@@ -10,7 +10,7 @@ This file guides Claude Code (claude.ai/code) at the start of every session in t
 
 **Phase 0 — Environment, Go fundamentals, CI skeleton.** Goal: a containerized Go HTTP service that returns `200` on `/healthz`, with lint + test running green in GitHub Actions on every push. The active worklist (build steps, decisions, verify) is [docs/phases/phase-0.md](docs/phases/phase-0.md).
 
-Module path is `github.com/ashfakhossainevan/shortn`. Confirm that matches the real GitHub username before `go mod init` — once code imports it, renaming it is a painful sweep, so never rename it later.
+Module path is `github.com/Ashfak-Hossain/shortn` (matches the real GitHub username at github.com/Ashfak-Hossain). Once code imports it, renaming it is a painful sweep, so never rename it later.
 
 ## Tech stack
 
