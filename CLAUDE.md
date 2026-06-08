@@ -8,9 +8,9 @@ This file guides Claude Code (claude.ai/code) at the start of every session in t
 
 ## Current status
 
-**Phase 0 — Environment, Go fundamentals, CI skeleton.** Goal: a containerized Go HTTP service that returns `200` on `/healthz`, with lint + test running green in GitHub Actions on every push. The active worklist (build steps, decisions, verify) is [docs/phases/phase-0.md](docs/phases/phase-0.md).
+**Phase 1 — Core URL shortener (MVP).** Goal: `POST /api/links` returns a short code; `GET /{code}` redirects to the original URL; data persists in PostgreSQL; runs locally via `docker-compose up`. The worklist source of truth is [PLAN.md](PLAN.md) Phase 1 — create `docs/phases/phase-1.md` from [docs/phases/_TEMPLATE.md](docs/phases/_TEMPLATE.md) when the phase starts.
 
-Module path is `github.com/Ashfak-Hossain/shortn` (matches the real GitHub username at github.com/Ashfak-Hossain). Once code imports it, renaming it is a painful sweep, so never rename it later.
+Phase 0 (environment, Go HTTP spine, lint/test/build CI) is **complete and green** — see [docs/phases/phase-0.md](docs/phases/phase-0.md). Module path is `github.com/Ashfak-Hossain/shortn` (matches the real GitHub username at github.com/Ashfak-Hossain). Once code imports it, renaming it is a painful sweep, so never rename it later.
 
 ## Tech stack
 
