@@ -1,0 +1,6 @@
+.git
+docs
+*.md
+deploy/k8s
+web
+.DS_Store

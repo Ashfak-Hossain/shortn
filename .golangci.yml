@@ -1,0 +1,20 @@
+version: '2'
+
+# Keep the standard set (errcheck, govet, ineffassign, staticcheck, unused) and
+# add revive for general style. Resist over-enabling — lint noise gets ignored.
+linters:
+  default: standard
+  enable:
+    - revive
+  exclusions:
+    rules:
+      # HTTP handlers must keep the (w, r) signature even when r is unused;
+      # renaming r to _ would only be reverted in Phase 1 when handlers read r.
+      - linters: [revive]
+        text: 'seems to be unused, consider removing or renaming'
+
+# In v2, formatters are separate from linters.
+formatters:
+  enable:
+    - gofmt
+    - goimports
