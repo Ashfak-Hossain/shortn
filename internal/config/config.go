@@ -1,3 +1,4 @@
+// Package config loads service configuration from environment variables into a typed Config struct.
 package config
 
 import "os"
