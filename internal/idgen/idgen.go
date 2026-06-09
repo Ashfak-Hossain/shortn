@@ -1,7 +1,4 @@
-// Package idgen provides utilities for generating unique identifiers,-
-// such as the short codes for URLs. The current implementation uses a -
-// cryptographically secure random generator to produce base62 strings, which are compact and URL-friendly.
-// This approach minimizes the risk of collisions while keeping the generated codes short and easy to use in URLs.
+// Package idgen provides utilities for generating unique ids.
 package idgen
 
 import (
@@ -9,9 +6,9 @@ import (
 	"math/big"
 )
 
-const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" // 62 char
 
-// RandomBase62 generates random strings of a specified length using the  alphabet.
+// RandomBase62 generates random strings of a specified length using the alphabet.
 type RandomBase62 struct {
 	length int
 }
@@ -21,8 +18,7 @@ func NewRandomBase62(length int) RandomBase62 {
 	return RandomBase62{length: length}
 }
 
-// Generate produces a random string of the configured length. The randomness is cryptographically secure, so the
-// probability of a collision is negligible for reasonable lengths.
+// Generate a random string. The randomness is crypto secure, so the probab of a collision is less
 func (g RandomBase62) Generate() (string, error) {
 	limit := big.NewInt(int64(len(alphabet)))
 	code := make([]byte, g.length)
