@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug api", // shows up in the Run-and-Debug dropdown (F5)
+      "type": "go",
+      "request": "launch",
+      "mode": "auto", // picks debug vs test mode automatically
+      "program": "${workspaceFolder}/cmd/api", // the main package to run
+      "env": { "PORT": "8080", "LOG_LEVEL": "debug", "ENV": "dev" }
+    }
+  ]
+}
