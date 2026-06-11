@@ -15,6 +15,7 @@ import (
 // handler is the root HTTP handler. Holds the dependencies that route handler share.
 type handler struct {
 	svc    *shortener.Service
+	pinger Pinger
 	logger *slog.Logger
 }
 

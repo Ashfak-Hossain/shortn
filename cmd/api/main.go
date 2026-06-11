@@ -1,6 +1,6 @@
 // Command api is the shortn HTTP service entrypoint. It wires configuration,
-// structured logging, the chi router, and an HTTP server with graceful
-// shutdown on SIGINT/SIGTERM.
+// structured logging, the database pool, the domain service, the HTTP router,
+// and an HTTP server with graceful shutdown on SIGINT/SIGTERM.
 package main
 
 import (
@@ -13,60 +13,58 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Ashfak-Hossain/shortn/internal/config"
+	httpapi "github.com/Ashfak-Hossain/shortn/internal/http"
+	"github.com/Ashfak-Hossain/shortn/internal/idgen"
+	"github.com/Ashfak-Hossain/shortn/internal/shortener"
+	"github.com/Ashfak-Hossain/shortn/internal/store"
 )
-
-// healthz is the liveness probe: it answers "is the process up?" and stays
-// dependency-free, so a blip in a downstream can never trigger a pod restart.
-func healthz(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
-}
-
-// readyz is the readiness probe: "can this instance serve traffic right now?"
-// It always returns 200 today; later phases check dependencies here so the
-// load balancer can drain an unready instance without killing it.
-func readyz(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
-}
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		// Bad config means the process can't run correctly: fail fast.
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
 
-	// JSON to stdout from day one so the Phase 6 log stack can index by field
-	// instead of parsing free-form text.
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: parseLevel(cfg.LogLevel),
 	}))
 	slog.SetDefault(logger)
 
-	r := chi.NewRouter()
-	r.Get("/healthz", healthz)
-	r.Get("/readyz", readyz)
+	// pgxpool.New only parses the DSN and connects lazily, so we Ping to fail
+	// fast on a bad URL or an unreachable database.
+	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("failed to create db pool", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
 
-	// Explicit server (not http.ListenAndServe) so we keep a handle for
-	// Shutdown. The timeouts are deliberate hardcoded defaults — not config —
-	// that bound how long a slow client can hold a connection open.
+	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelPing()
+	if err := pool.Ping(pingCtx); err != nil {
+		logger.Error("database not reachable", "err", err)
+		os.Exit(1)
+	}
+
+	// Compose the layers: store + generator -> domain service -> HTTP router.
+	st := store.New(pool)
+	gen := idgen.NewRandomBase62(7)
+	svc := shortener.NewService(st, gen)
+	router := httpapi.NewRouter(svc, pool, logger)
+
 	addr := ":" + cfg.Port
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      r,
+		Handler:      router,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// ListenAndServe blocks, so run it off the main goroutine. A clean Shutdown
-	// makes it return ErrServerClosed — the expected success path — so only a
-	// different error is fatal.
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server failed", "err", err)
@@ -75,15 +73,10 @@ func main() {
 	}()
 	logger.Info("server started", "addr", addr, "env", cfg.Env)
 
-	// Buffered by one so the runtime can deliver the signal even before we park
-	// on the receive. SIGINT is Ctrl-C; SIGTERM is what an orchestrator sends.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig // block here until a signal arrives; the drain below does the real work
+	<-sig
 
-	// Stop accepting connections and let in-flight requests finish, but no
-	// longer than the grace period. This is the drain sequence Kubernetes
-	// relies on for zero-downtime rolling deploys.
 	logger.Info("shutdown signal received, draining connections")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -94,8 +87,7 @@ func main() {
 	logger.Info("server stopped cleanly")
 }
 
-// parseLevel maps a LOG_LEVEL string to an slog.Level, defaulting to Info for
-// empty or unrecognized values.
+// parseLevel maps a LOG_LEVEL string to an slog.Level, defaulting to Info.
 func parseLevel(level string) slog.Level {
 	switch level {
 	case "debug":
