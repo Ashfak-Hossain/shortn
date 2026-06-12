@@ -13,13 +13,12 @@ import (
 // it was handed the raw Postgres store or this cache-wrapped one.
 type CachingStore struct {
 	next  shortener.LinkStore // the wrapped store (Postgres) — the source of truth
-	cache *Client             // our thin Redis wrapper
-	ttl   time.Duration       // how long a cached entry lives before it self-expires
-	log   *slog.Logger        // for logging non-fatal cache failures
+	cache *Client
+	ttl   time.Duration
+	log   *slog.Logger // non-fatal cache failures only
 }
 
-// Compile-time assertion that *CachingStore satisfies LinkStore — same guard
-// the Postgres store uses. If the interface changes and we miss it, build fails.
+// Compile-time assertion that *CachingStore satisfies LinkStore.
 var _ shortener.LinkStore = (*CachingStore)(nil)
 
 // NewCachingStore wraps next with a Redis read-through cache.
@@ -41,20 +40,17 @@ func (s *CachingStore) Create(ctx context.Context, link *shortener.Link) error {
 func (s *CachingStore) GetByCode(ctx context.Context, code string) (*shortener.Link, error) {
 	k := key(code)
 
-	// Try the cache. If Redis itself errors, fail OPEN: log and fall through.
 	if url, found, err := s.cache.Get(ctx, k); err != nil {
 		s.log.Warn("cache get failed; serving from store", "code", code, "err", err)
 	} else if found {
 		return &shortener.Link{Code: code, LongURL: url}, nil
 	}
 
-	// Miss (or Redis down): read the source of truth.
 	link, err := s.next.GetByCode(ctx, code)
 	if err != nil {
 		return nil, err
 	}
 
-	// Populate the cache for next time. Also non-fatal if it fails.
 	if err := s.cache.Set(ctx, k, link.LongURL, s.ttl); err != nil {
 		s.log.Warn("cache set failed", "code", code, "err", err)
 	}
