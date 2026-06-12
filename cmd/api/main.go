@@ -15,13 +15,21 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/Ashfak-Hossain/shortn/internal/cache"
 	"github.com/Ashfak-Hossain/shortn/internal/config"
 	httpapi "github.com/Ashfak-Hossain/shortn/internal/http"
 	"github.com/Ashfak-Hossain/shortn/internal/idgen"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/Ashfak-Hossain/shortn/internal/store"
 )
+
+// cacheTTL is how long a resolved link stays in Redis before it self-expires.
+// One hour is a deliberate tradeoff: long enough that hot links almost always
+// hit the cache, short enough that an edited/deleted link self-heals quickly
+// even if an invalidation were ever missed.
+const cacheTTL = time.Hour
 
 func main() {
 	// Load application settings from the environment.
@@ -56,11 +64,32 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Build the Redis client. redis.ParseURL turns the DSN into options
+	// (pool size, db index, etc.); go-redis connects lazily on first use.
+	opts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		logger.Error("invalid REDIS_URL", "err", err)
+		os.Exit(1)
+	}
+	rdb := redis.NewClient(opts)
+	defer rdb.Close()
+
+	// Unlike Postgres, a Redis outage is NOT fatal — the cache is an optimization,
+	// not a dependency. We ping only to surface a warning; we keep booting either way.
+	// This is the "fail open" principle enforced at startup.
+	redisPingCtx, cancelRedisPing := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelRedisPing()
+	if err := rdb.Ping(redisPingCtx).Err(); err != nil {
+		logger.Warn("redis not reachable at startup; serving uncached from postgres", "err", err)
+	}
+
 	// We instantiate the core domain logic, injecting the necessary data store
 	// and utility dependencies to compose the application layers.
 	st := store.New(pool)
+	cachingStore := cache.NewCachingStore(st, cache.New(rdb), cacheTTL, logger)
 	gen := idgen.NewRandomBase62(7)
-	svc := shortener.NewService(st, gen)
+	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
+
 	router := httpapi.NewRouter(svc, pool, logger)
 
 	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
