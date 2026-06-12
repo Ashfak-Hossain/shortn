@@ -17,6 +17,19 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:8-alpine
+    ports:
+      - '6379:6379'
+    # No volume: a cache is ephemeral by design. If Redis is wiped, the app
+    # repopulates it from Postgres on the next miss. Persisting it would only
+    # buy us a warm cache after a restart, at the cost of stale data surviving.
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   migrate:
     image: migrate/migrate # pin to CLI version (run: migrate -version)
     depends_on:
@@ -42,6 +55,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     environment:
@@ -49,6 +64,7 @@ services:
       LOG_LEVEL: info
       ENV: dev
       DATABASE_URL: postgres://dev:dev@postgres:5432/shortn?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
     ports:
       - '8080:8080'
 

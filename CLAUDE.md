@@ -8,7 +8,7 @@ This file guides Claude Code (claude.ai/code) at the start of every session in t
 
 ## Current status
 
-**Phase 1 — Core URL shortener (MVP).** Goal: `POST /api/links` returns a short code; `GET /{code}` redirects to the original URL; data persists in PostgreSQL; runs locally via `docker-compose up`. The worklist source of truth is [PLAN.md](PLAN.md) Phase 1 — create `docs/phases/phase-1.md` from [docs/phases/_TEMPLATE.md](docs/phases/_TEMPLATE.md) when the phase starts.
+**Phase 1 — Core URL shortener (MVP).** Goal: `POST /api/links` returns a short code; `GET /{code}` redirects to the original URL; data persists in PostgreSQL; runs locally via `docker-compose up`. The worklist source of truth is [PLAN.md](PLAN.md) Phase 1 — create `docs/phases/phase-1.md` from [docs/phases/\_TEMPLATE.md](docs/phases/_TEMPLATE.md) when the phase starts.
 
 Phase 0 (environment, Go HTTP spine, lint/test/build CI) is **complete and green** — see [docs/phases/phase-0.md](docs/phases/phase-0.md). Module path is `github.com/Ashfak-Hossain/shortn` (matches the real GitHub username at github.com/Ashfak-Hossain). Once code imports it, renaming it is a painful sweep, so never rename it later.
 
@@ -51,7 +51,7 @@ Clean, layered design with **dependency inversion**: the domain depends on inter
 
 ## Directory layout
 
-```
+```text
 shortn/
 ├── PLAN.md                  # curriculum (source of truth)
 ├── README.md                # grows every phase
@@ -105,6 +105,11 @@ More targets are added per phase (`migrate-up`/`migrate-down` P1, `scale` P3, `r
 - **Commits:** conventional and small (`feat:`, `fix:`, `docs:`, `chore:`, `build:`, `ci:`, `test:`).
 - **ADRs:** every time we pick X over Y, write a one-page record in [docs/architecture/](docs/architecture/README.md) as _Context → Decision → Alternatives → Consequences_. Phase 0 ships ADRs 0001–0003.
 - **Definition of Done is non-negotiable.** A phase is done only when its PLAN.md checklist passes **and** the Defend questions can be answered. "It runs on my machine" is not done.
+-
+
+## Go Doc Comments
+
+- Doc comment rules: see docs/standards/go-doc-comments.md
 
 ## Docs map
 

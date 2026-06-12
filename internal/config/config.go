@@ -9,6 +9,7 @@ type Config struct {
 	LogLevel    string // LOG_LEVEL: debug|info|warn|error, default info
 	Env         string // ENV: dev|staging|prod, default dev
 	DatabaseURL string // DATABASE_URL, Postgres DSN
+	RedisURL    string // REDIS_URL, Redis DSN
 }
 
 // Load reads config from env, applying defaults.
@@ -18,6 +19,7 @@ func Load() (Config, error) {
 		LogLevel:    getEnv("LOG_LEVEL", "info"),
 		Env:         getEnv("ENV", "dev"),
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://dev:dev@localhost:5432/shortn?sslmode=disable"),
+		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379/0"),
 	}, nil
 }
 
