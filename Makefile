@@ -1,9 +1,12 @@
-.PHONY: run test lint docker migrate-up migrate-down
+.PHONY: run build test lint docker migrate-up migrate-down
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 
 run:
 	go run ./cmd/api
+
+build:
+	go build ./...
 
 test:
 	go test ./...
