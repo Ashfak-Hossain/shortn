@@ -72,7 +72,11 @@ func main() {
 		os.Exit(1)
 	}
 	rdb := redis.NewClient(opts)
-	defer rdb.Close()
+	defer func() {
+		if err := rdb.Close(); err != nil {
+			logger.Warn("failed to close redis client", "err", err)
+		}
+	}()
 
 	// Unlike Postgres, a Redis outage is NOT fatal — the cache is an optimization,
 	// not a dependency. We ping only to surface a warning; we keep booting either way.
