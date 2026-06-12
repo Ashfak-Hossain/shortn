@@ -47,7 +47,7 @@ func main() {
 		logger.Error("failed to create db pool", "err", err)
 		os.Exit(1)
 	}
-	defer pool.Close()
+	defer pool.Close() // scheduled to run when main() returns
 
 	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelPing()
