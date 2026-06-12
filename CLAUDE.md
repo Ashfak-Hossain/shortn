@@ -51,7 +51,7 @@ Clean, layered design with **dependency inversion**: the domain depends on inter
 
 ## Directory layout
 
-```
+```text
 shortn/
 ├── PLAN.md                  # curriculum (source of truth)
 ├── README.md                # grows every phase
