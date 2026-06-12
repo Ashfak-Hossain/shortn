@@ -102,6 +102,20 @@ func (s *CachingStore) loadAndCache(ctx context.Context, code string) (*shortene
 	return link, nil
 }
 
+// Invalidate removes a code's cached entry so the next read repopulates from the
+// store. This is the seam a future link edit/delete handler calls to keep Redis
+// consistent with Postgres. No caller exists yet (Phase 1 exposes no mutation of
+// existing links) — it's here so the consistency contract is explicit and tested
+// ahead of need. Fail open: a Redis error is logged and returned, but the caller
+// can safely ignore it because the entry's TTL is the backstop.
+func (s *CachingStore) Invalidate(ctx context.Context, code string) error {
+	if err := s.cache.Del(ctx, key(code)); err != nil {
+		s.log.Warn("cache invalidate failed", "code", code, "err", err)
+		return err
+	}
+	return nil
+}
+
 // key namespaces cache keys so links never collide with other data Redis might
 // hold later (rate-limit counters, sessions, etc.). Value at link:{code} is the long URL.
 func key(code string) string {
