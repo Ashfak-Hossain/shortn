@@ -1,3 +1,6 @@
+// Package http implements the HTTP delivery layer for the application.
+// It provides the routing, handler logic, and operational health probes required
+// to expose the core domain service over the web.
 package http
 
 import (
@@ -11,39 +14,59 @@ import (
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 )
 
-// Pinger is the minimal capability readyz needs to check downstream health.
-// *pgxpool.Pool satisfies it, so this package stays decoupled from pgx.
+// Pinger defines the minimal capability required to verify downstream system health.
+// By relying on this interface rather than a concrete db pool, the HTTP
+// layer remains strictly decoupled from specific db implementations (like pgx).
 type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-// NewRouter wires every route to the given service and returns the handler tree.
+// NewRouter constructs and wires the HTTP routing tree.
+// It injects the core domain service, health deps, and structured
+// logger into the handlers, returning a fully configured http.Handler ready
+// to be served.
 func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger) http.Handler {
+	// We bind the injected deps to our handler struct so they are
+	// safely accessible to the individual route methods.
 	h := &handler{svc: svc, pinger: pinger, logger: logger}
 
 	router := chi.NewRouter()
+
+	// Op endpoints
 	router.Get("/healthz", healthz)
 	router.Get("/readyz", h.readyz)
+
+	// API endpoints
 	router.Post("/api/links", h.createLink)
 	router.Get("/{code}", h.redirect)
 
 	return router
 }
 
-// healthz is the liveness probe — dependency-free, so a downstream blip never triggers a restart.
+// healthz implements a standard Kubernetes liveness probe.
+// It purposefully checks zero downstream deps. This guarantees that a
+// temporary network blip to the db does not trigger orchestration systems
+// to aggressively kill and restart the application container.
 func healthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
 }
 
-// readyz reports 200 only if the database answers, so a load balancer can stop
-// routing to an instance whose DB is unreachable without killing it.
+// readyz implements a standard Kubernetes readiness probe.
+// It actively verifies connectivity to critical downstream deps.
+// If the db is unreachable, it returns a 503, instructing load balancers
+// to temporarily stop routing traffic to this instance without terminating the process.
 func (h *handler) readyz(w http.ResponseWriter, r *http.Request) {
+	// We enforce a strict, short timeout to prevent the readiness check from hanging
+	// indefinitely and exhausting server resources if the network or database is frozen.
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 
 	if err := h.pinger.Ping(ctx); err != nil {
 		h.logger.Error("readiness check failed", "err", err)
+
+		// We explicitly return a 503 Service Unavailable so the load balancer
+		// accurately interprets this as a failed readiness state.
 		writeError(w, http.StatusServiceUnavailable, "not ready")
 		return
 	}
