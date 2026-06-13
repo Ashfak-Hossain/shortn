@@ -31,7 +31,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test -tags integration ./...
+      - name: Start compose stack
+        run: docker compose -f deploy/compose/docker-compose.yml up -d --build --wait
+      - name: Wait for API to be ready
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost/healthz && echo "API ready" && break
+            echo "Waiting... ($i/30)" && sleep 3
+          done
+      - name: Run integration tests
+        run: go test -tags integration -v ./test/... -count=1
+      - name: Tear down compose stack
+        if: always()
+        run: docker compose -f deploy/compose/docker-compose.yml down
 
   build:
     runs-on: ubuntu-latest
