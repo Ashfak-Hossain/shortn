@@ -108,7 +108,7 @@ func main() {
 	cachingStore := cache.NewCachingStore(st, cache.New(rdb), cacheTTL, logger)
 	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
 
-	router := httpapi.NewRouter(svc, pool, logger)
+	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID)
 
 	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
 	// and prevent resource exhaustion from stale or malicious client connections.

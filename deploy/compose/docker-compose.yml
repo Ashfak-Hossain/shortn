@@ -31,7 +31,7 @@ services:
       retries: 5
 
   migrate:
-    image: migrate/migrate # pin to CLI version (run: migrate -version)
+    image: migrate/migrate
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,7 +46,7 @@ services:
         'up',
       ]
 
-  api:
+  api-1:
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -65,8 +65,63 @@ services:
       ENV: dev
       DATABASE_URL: postgres://dev:dev@postgres:5432/shortn?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      WORKER_ID: '0'
+      INSTANCE_ID: api-1
+
+  api-2:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        SERVICE: api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: '8080'
+      LOG_LEVEL: info
+      ENV: dev
+      DATABASE_URL: postgres://dev:dev@postgres:5432/shortn?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      WORKER_ID: '1'
+      INSTANCE_ID: api-2
+
+  api-3:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        SERVICE: api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: '8080'
+      LOG_LEVEL: info
+      ENV: dev
+      DATABASE_URL: postgres://dev:dev@postgres:5432/shortn?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      WORKER_ID: '2'
+      INSTANCE_ID: api-3
+
+  nginx:
+    image: nginx:alpine
     ports:
-      - '8080:8080'
+      - '80:80'
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api-1
+      - api-2
+      - api-3
 
 volumes:
   pgdata:

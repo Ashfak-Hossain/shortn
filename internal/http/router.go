@@ -25,12 +25,14 @@ type Pinger interface {
 // It injects the core domain service, health deps, and structured
 // logger into the handlers, returning a fully configured http.Handler ready
 // to be served.
-func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger) http.Handler {
+func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string) http.Handler {
 	// We bind the injected deps to our handler struct so they are
 	// safely accessible to the individual route methods.
 	h := &handler{svc: svc, pinger: pinger, logger: logger}
 
 	router := chi.NewRouter()
+
+	router.Use(ServedByMiddleware(instanceID))
 
 	// Op endpoints
 	router.Get("/healthz", healthz)

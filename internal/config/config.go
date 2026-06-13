@@ -1,4 +1,5 @@
-// Package config loads service configuration from environment variables into a typed Config struct.
+// Package config loads service configuration from environment variables
+// into a typed Config struct.
 package config
 
 import "os"
@@ -11,9 +12,11 @@ type Config struct {
 	DatabaseURL string // DATABASE_URL, Postgres DSN
 	RedisURL    string // REDIS_URL, Redis DSN
 	WorkerID    string // WORKER_ID, required; no default
+	InstanceID  string // INSTANCE_ID, defaults to hostname
 }
 
-// Load reads config from env, applying defaults.
+// Load reads the configuration from the environment variables, applying
+// appropriate fallback defaults where necessary.
 func Load() (Config, error) {
 	return Config{
 		Port:        getEnv("PORT", "8080"),
@@ -21,14 +24,26 @@ func Load() (Config, error) {
 		Env:         getEnv("ENV", "dev"),
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://dev:dev@localhost:5432/shortn?sslmode=disable"),
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379/0"),
-		WorkerID:    os.Getenv("WORKER_ID"), // required, no default
+		WorkerID:    os.Getenv("WORKER_ID"),
+		InstanceID:  getEnvOrHostname("INSTANCE_ID"),
 	}, nil
 }
 
-// getEnv returns the env value, or fallback if unset/empty.
+// getEnv returns the environment variable value associated with the key,
+// or the fallback string if it is unset or empty.
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return fallback
+}
+
+// getEnvOrHostname returns the environment variable value associated with the key,
+// or the system hostname if the environment variable is unset or empty.
+func getEnvOrHostname(key string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	h, _ := os.Hostname()
+	return h
 }
