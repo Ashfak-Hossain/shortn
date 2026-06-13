@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	sqids "github.com/sqids/sqids-go"
 
 	"github.com/Ashfak-Hossain/shortn/internal/cache"
 	"github.com/Ashfak-Hossain/shortn/internal/config"
@@ -39,6 +41,26 @@ func main() {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
+	if cfg.WorkerID == "" {
+		slog.Error("WORKER_ID is required")
+		os.Exit(1)
+	}
+	wid, err := strconv.ParseUint(cfg.WorkerID, 10, 16)
+	if err != nil || wid > 1023 {
+		slog.Error("WORKER_ID must be an integer in [0, 1023]", "value", cfg.WorkerID)
+		os.Exit(1)
+	}
+	sq, err := sqids.New(sqids.Options{Alphabet: cfg.SqidsAlphabet})
+	if err != nil {
+		slog.Error("failed to initialise sqids encoder", "err", err)
+		os.Exit(1)
+	}
+	gen, err := idgen.NewSnowflakeGenerator(uint16(wid), sq)
+
+	if err != nil {
+		slog.Error("failed to create ID generator", "err", err)
+		os.Exit(1)
+	}
 
 	// Initialize a JSON logger for machine-readable output in prod.
 	// We set this as the default logger so standard library logs capture the same format.
@@ -47,7 +69,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	// pgxpool. New establishes the configuration but connects lazily.
+	// pgxpool.New establishes the configuration but connects lazily.
 	// We mandate an immediate Ping to ensure the database is reachable on startup,
 	// preventing the application from accepting traffic when the DB is down.
 	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
@@ -91,10 +113,9 @@ func main() {
 	// and utility dependencies to compose the application layers.
 	st := store.New(pool)
 	cachingStore := cache.NewCachingStore(st, cache.New(rdb), cacheTTL, logger)
-	gen := idgen.NewRandomBase62(7)
 	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
 
-	router := httpapi.NewRouter(svc, pool, logger)
+	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID)
 
 	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
 	// and prevent resource exhaustion from stale or malicious client connections.

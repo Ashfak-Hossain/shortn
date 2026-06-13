@@ -1,0 +1,4 @@
+name: 'shortn — local (direct, port 8080)'
+values:
+  - key: base_url
+    value: 'http://localhost:8080'

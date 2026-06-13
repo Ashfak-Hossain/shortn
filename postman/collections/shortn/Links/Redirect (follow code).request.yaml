@@ -1,0 +1,21 @@
+$kind: http-request
+name: Redirect (follow code)
+description: Resolves the short code and redirects to the original URL. Run Create short link first — it populates {{code}} automatically.
+url: "{{base_url}}/{{code}}"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("code was set (Create short link ran first)", () => {
+          const code = pm.collectionVariables.get("code");
+          pm.expect(code).to.be.a('string').and.not.empty;
+      });
+
+      // Postman follows redirects by default so we see the final destination response
+      // (example.com), not our server's 302. X-Served-By is on the intermediate
+      // response and is not visible here — tested on all other requests instead.
+      pm.test("not a server error from shortn", () => {
+          pm.expect(pm.response.code).to.not.be.oneOf([404, 500]);
+      });
+    language: text/javascript
+order: 2000
