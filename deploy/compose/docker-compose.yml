@@ -67,6 +67,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       WORKER_ID: '0'
       INSTANCE_ID: api-1
+      SQIDS_ALPHABET: '0aA1bB2cC3dD4eE5fF6gG7hH8iI9jJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ'
 
   api-2:
     build:
@@ -89,6 +90,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       WORKER_ID: '1'
       INSTANCE_ID: api-2
+      SQIDS_ALPHABET: '0aA1bB2cC3dD4eE5fF6gG7hH8iI9jJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ'
 
   api-3:
     build:
@@ -111,6 +113,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       WORKER_ID: '2'
       INSTANCE_ID: api-3
+      SQIDS_ALPHABET: '0aA1bB2cC3dD4eE5fF6gG7hH8iI9jJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ'
 
   nginx:
     image: nginx:alpine
