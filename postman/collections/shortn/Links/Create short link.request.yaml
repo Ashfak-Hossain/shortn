@@ -9,15 +9,36 @@ body:
   type: json
   content: |-
     {
-      "url": "https://exampleHavetoBrngingisngiohbrgeiohngeBigForTestingPurpose.com"
+      "url": "https://example.com"
     }
 scripts:
   - type: afterResponse
     code: |-
+      // Save code for use in Redirect request
       const res = pm.response.json();
       if (res.code) {
           pm.collectionVariables.set('code', res.code);
-          console.log('Saved code:', res.code);
       }
+
+      pm.test("status is 201", () => {
+          pm.response.to.have.status(201);
+      });
+
+      pm.test("response has code", () => {
+          pm.expect(res.code).to.be.a('string').and.not.empty;
+      });
+
+      pm.test("response has short_url containing the code", () => {
+          pm.expect(res.short_url).to.include(res.code);
+      });
+
+      pm.test("response has long_url", () => {
+          pm.expect(res.long_url).to.be.a('string').and.not.empty;
+      });
+
+      pm.test("X-Served-By header is set", () => {
+          const header = pm.response.headers.get("X-Served-By");
+          pm.expect(header).to.match(/^api-\d+$/);
+      });
     language: text/javascript
 order: 1000

@@ -1,5 +1,22 @@
 $kind: http-request
-description: Kubernetes readiness probe. Returns 503 if Postgres is unreachable.
+name: Readiness (readyz)
+description: Kubernetes readiness probe. Returns 200 when Postgres is reachable, 503 when it is not.
 url: "{{base_url}}/readyz"
 method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("status is 200 (postgres reachable)", () => {
+          pm.response.to.have.status(200);
+      });
+
+      pm.test("body is 'ok'", () => {
+          pm.expect(pm.response.text()).to.equal("ok");
+      });
+
+      pm.test("X-Served-By header is set", () => {
+          const header = pm.response.headers.get("X-Served-By");
+          pm.expect(header).to.match(/^api-\d+$/);
+      });
+    language: text/javascript
 order: 2000

@@ -1,5 +1,22 @@
 $kind: http-request
+name: Liveness (healthz)
 description: Kubernetes liveness probe. Checks only that the process is alive — no downstream deps.
 url: "{{base_url}}/healthz"
 method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("status is 200", () => {
+          pm.response.to.have.status(200);
+      });
+
+      pm.test("body is 'ok'", () => {
+          pm.expect(pm.response.text()).to.equal("ok");
+      });
+
+      pm.test("X-Served-By header is set", () => {
+          const header = pm.response.headers.get("X-Served-By");
+          pm.expect(header).to.match(/^api-\d+$/);
+      });
+    language: text/javascript
 order: 1000
