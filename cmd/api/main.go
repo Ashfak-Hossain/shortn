@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -37,6 +38,20 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
+		os.Exit(1)
+	}
+	if cfg.WorkerID == "" {
+		slog.Error("WORKER_ID is required")
+		os.Exit(1)
+	}
+	wid, err := strconv.ParseUint(cfg.WorkerID, 10, 16)
+	if err != nil || wid > 1023 {
+		slog.Error("WORKER_ID must be an integer in [0, 1023]", "value", cfg.WorkerID)
+		os.Exit(1)
+	}
+	gen, err := idgen.NewSnowflakeGenerator(uint16(wid))
+	if err != nil {
+		slog.Error("failed to create ID generator", "err", err)
 		os.Exit(1)
 	}
 
@@ -91,7 +106,6 @@ func main() {
 	// and utility dependencies to compose the application layers.
 	st := store.New(pool)
 	cachingStore := cache.NewCachingStore(st, cache.New(rdb), cacheTTL, logger)
-	gen := idgen.NewRandomBase62(7)
 	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
 
 	router := httpapi.NewRouter(svc, pool, logger)

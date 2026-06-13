@@ -10,6 +10,7 @@ type Config struct {
 	Env         string // ENV: dev|staging|prod, default dev
 	DatabaseURL string // DATABASE_URL, Postgres DSN
 	RedisURL    string // REDIS_URL, Redis DSN
+	WorkerID    string // WORKER_ID, required; no default
 }
 
 // Load reads config from env, applying defaults.
@@ -20,6 +21,7 @@ func Load() (Config, error) {
 		Env:         getEnv("ENV", "dev"),
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://dev:dev@localhost:5432/shortn?sslmode=disable"),
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		WorkerID:    os.Getenv("WORKER_ID"), // required, no default
 	}, nil
 }
 
