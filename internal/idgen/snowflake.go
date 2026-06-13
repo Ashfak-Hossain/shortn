@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
+	sqids "github.com/sqids/sqids-go"
 )
 
 const (
@@ -35,16 +36,17 @@ type SnowflakeGenerator struct {
 	workerID uint16
 	sequence uint16
 	lastMs   int64
+	sq       *sqids.Sqids
 }
 
 // NewSnowflakeGenerator returns a [SnowflakeGenerator] configured with the given
 // workerID. workerID must be in the range [0, 1023]; values outside that range
 // return a non-nil error.
-func NewSnowflakeGenerator(workerID uint16) (*SnowflakeGenerator, error) {
+func NewSnowflakeGenerator(workerID uint16, sq *sqids.Sqids) (*SnowflakeGenerator, error) {
 	if workerID > maxWorkerID {
 		return nil, fmt.Errorf("workerID must be in range [0, 1023]")
 	}
-	return &SnowflakeGenerator{workerID: workerID}, nil
+	return &SnowflakeGenerator{workerID: workerID, sq: sq}, nil
 }
 
 // Compile-time check that *SnowflakeGenerator satisfies shortener.IDGenerator.
@@ -89,24 +91,10 @@ func (g *SnowflakeGenerator) Generate() (string, error) {
 	//   [ timestamp: 41 bits ][ workerID: 10 bits ][ sequence: 12 bits ]
 	// Left-shifting pushes each value into its designated slot; OR merges them.
 	id := (uint64(now) << (workerBits + sequenceBits)) | (uint64(g.workerID) << sequenceBits) | uint64(g.sequence)
-	return encodeBase62(id), nil
-}
-
-func encodeBase62(n uint64) string {
-	if n == 0 {
-		return string(alphabet[0])
+	code, err := g.sq.Encode([]uint64{id})
+	if err != nil {
+		return "", fmt.Errorf("encode id: %w", err)
 	}
+	return code, nil
 
-	result := []byte{}
-	for n > 0 {
-		result = append(result, alphabet[n%62])
-		n /= 62
-	}
-
-	// Reverse in-place: the loop above built the string back-to-front.
-	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
-		result[i], result[j] = result[j], result[i]
-	}
-
-	return string(result)
 }

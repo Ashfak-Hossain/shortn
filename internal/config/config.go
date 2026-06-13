@@ -6,26 +6,29 @@ import "os"
 
 // Config holds everything the service needs to boot.
 type Config struct {
-	Port        string // PORT, default 8080
-	LogLevel    string // LOG_LEVEL: debug|info|warn|error, default info
-	Env         string // ENV: dev|staging|prod, default dev
-	DatabaseURL string // DATABASE_URL, Postgres DSN
-	RedisURL    string // REDIS_URL, Redis DSN
-	WorkerID    string // WORKER_ID, required; no default
-	InstanceID  string // INSTANCE_ID, defaults to hostname
+	Port          string // PORT, default 8080
+	LogLevel      string // LOG_LEVEL: debug|info|warn|error, default info
+	Env           string // ENV: dev|staging|prod, default dev
+	DatabaseURL   string // DATABASE_URL, Postgres DSN
+	RedisURL      string // REDIS_URL, Redis DSN
+	WorkerID      string // WORKER_ID, required; no default
+	InstanceID    string // INSTANCE_ID, defaults to hostname
+	SqidsAlphabet string // SQIDS_ALPHABET — shuffled base62 alphabet; must never change after codes are issued
+
 }
 
 // Load reads the configuration from the environment variables, applying
 // appropriate fallback defaults where necessary.
 func Load() (Config, error) {
 	return Config{
-		Port:        getEnv("PORT", "8080"),
-		LogLevel:    getEnv("LOG_LEVEL", "info"),
-		Env:         getEnv("ENV", "dev"),
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://dev:dev@localhost:5432/shortn?sslmode=disable"),
-		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379/0"),
-		WorkerID:    os.Getenv("WORKER_ID"),
-		InstanceID:  getEnvOrHostname("INSTANCE_ID"),
+		Port:          getEnv("PORT", "8080"),
+		LogLevel:      getEnv("LOG_LEVEL", "info"),
+		Env:           getEnv("ENV", "dev"),
+		DatabaseURL:   getEnv("DATABASE_URL", "postgres://dev:dev@localhost:5432/shortn?sslmode=disable"),
+		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		WorkerID:      os.Getenv("WORKER_ID"),
+		InstanceID:    getEnvOrHostname("INSTANCE_ID"),
+		SqidsAlphabet: getEnv("SQIDS_ALPHABET", "0aA1bB2cC3dD4eE5fF6gG7hH8iI9jJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ"),
 	}, nil
 }
 

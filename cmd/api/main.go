@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	sqids "github.com/sqids/sqids-go"
 
 	"github.com/Ashfak-Hossain/shortn/internal/cache"
 	"github.com/Ashfak-Hossain/shortn/internal/config"
@@ -49,7 +50,13 @@ func main() {
 		slog.Error("WORKER_ID must be an integer in [0, 1023]", "value", cfg.WorkerID)
 		os.Exit(1)
 	}
-	gen, err := idgen.NewSnowflakeGenerator(uint16(wid))
+	sq, err := sqids.New(sqids.Options{Alphabet: cfg.SqidsAlphabet})
+	if err != nil {
+		slog.Error("failed to initialise sqids encoder", "err", err)
+		os.Exit(1)
+	}
+	gen, err := idgen.NewSnowflakeGenerator(uint16(wid), sq)
+
 	if err != nil {
 		slog.Error("failed to create ID generator", "err", err)
 		os.Exit(1)

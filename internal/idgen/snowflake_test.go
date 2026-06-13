@@ -3,17 +3,28 @@ package idgen
 import (
 	"testing"
 	"time"
+
+	sqids "github.com/sqids/sqids-go"
 )
 
+func newTestSqids(t *testing.T) *sqids.Sqids {
+	t.Helper()
+	sq, err := sqids.New()
+	if err != nil {
+		t.Fatalf("sqids.New() error = %v", err)
+	}
+	return sq
+}
+
 func TestSnowflake_New_InvalidWorkerID(t *testing.T) {
-	_, err := NewSnowflakeGenerator(1024)
+	_, err := NewSnowflakeGenerator(1024, newTestSqids(t))
 	if err == nil {
 		t.Fatal("expected error for workerID 1024, got nil")
 	}
 }
 
 func TestSnowflake_Generate_ReturnsCode(t *testing.T) {
-	gen, err := NewSnowflakeGenerator(0)
+	gen, err := NewSnowflakeGenerator(0, newTestSqids(t))
 	if err != nil {
 		t.Fatalf("NewSnowflakeGenerator(0) error = %v", err)
 	}
@@ -28,7 +39,7 @@ func TestSnowflake_Generate_ReturnsCode(t *testing.T) {
 }
 
 func TestSnowflake_Generate_UniqueCodesWithinSameMs(t *testing.T) {
-	gen, err := NewSnowflakeGenerator(0)
+	gen, err := NewSnowflakeGenerator(0, newTestSqids(t))
 	if err != nil {
 		t.Fatalf("NewSnowflakeGenerator(0) error = %v", err)
 	}
@@ -42,7 +53,7 @@ func TestSnowflake_Generate_UniqueCodesWithinSameMs(t *testing.T) {
 }
 
 func TestSnowflake_Generate_ClockRegressed(t *testing.T) {
-	gen, err := NewSnowflakeGenerator(0)
+	gen, err := NewSnowflakeGenerator(0, newTestSqids(t))
 	if err != nil {
 		t.Fatalf("NewSnowflakeGenerator(0) error = %v", err)
 	}
