@@ -1,0 +1,5 @@
+$kind: http-request
+description: Resolves the short code and redirects to the original URL. Run Create short link first — it populates {{code}} automatically.
+url: "{{base_url}}/{{code}}"
+method: GET
+order: 2000

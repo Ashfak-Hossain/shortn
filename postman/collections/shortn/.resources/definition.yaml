@@ -1,0 +1,5 @@
+$kind: collection
+description: URL shortener API — Phase 3. Import one of the environment files alongside this collection to switch between nginx (port 80) and direct (port 8080).
+variables:
+  base_url: http://localhost
+  code: ""

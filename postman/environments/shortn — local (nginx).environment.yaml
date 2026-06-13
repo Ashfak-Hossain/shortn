@@ -1,0 +1,4 @@
+name: shortn — local (nginx)
+values:
+  - key: base_url
+    value: 'http://localhost'

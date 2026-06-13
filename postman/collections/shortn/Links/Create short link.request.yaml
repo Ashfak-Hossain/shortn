@@ -1,0 +1,23 @@
+$kind: http-request
+name: Create short link
+description: Creates a short link. The test script auto-saves the returned `code` into the `code` collection variable so the Redirect request works immediately.
+url: "{{base_url}}/api/links"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "url": "https://exampleHavetoBrngingisngiohbrgeiohngeBigForTestingPurpose.com"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      if (res.code) {
+          pm.collectionVariables.set('code', res.code);
+          console.log('Saved code:', res.code);
+      }
+    language: text/javascript
+order: 1000

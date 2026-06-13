@@ -1,0 +1,5 @@
+$kind: http-request
+description: Kubernetes readiness probe. Returns 503 if Postgres is unreachable.
+url: "{{base_url}}/readyz"
+method: GET
+order: 2000
