@@ -14,17 +14,14 @@ import (
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 )
 
-// Pinger defines the minimal capability required to verify downstream system health.
-// By relying on this interface rather than a concrete db pool, the HTTP
-// layer remains strictly decoupled from specific db implementations (like pgx).
+// Pinger is implemented by any value that can verify connectivity to a downstream
+// dependency. Ping must return a non-nil error if the dependency is unreachable.
 type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-// NewRouter constructs and wires the HTTP routing tree.
-// It injects the core domain service, health deps, and structured
-// logger into the handlers, returning a fully configured http.Handler ready
-// to be served.
+// NewRouter returns a fully configured [http.Handler] with all application routes registered.
+// The instanceID value is attached to every response as the X-Served-By header.
 func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string) http.Handler {
 	// We bind the injected deps to our handler struct so they are
 	// safely accessible to the individual route methods.

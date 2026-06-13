@@ -14,6 +14,8 @@ import (
 )
 
 const (
+	// epoch is the project's custom epoch in Unix milliseconds, chosen to keep
+	// the timestamp component small and the generated codes short.
 	epoch        int64  = 954028800000
 	workerBits          = 10
 	sequenceBits        = 12

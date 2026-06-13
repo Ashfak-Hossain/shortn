@@ -1,5 +1,7 @@
 //go:build integration
 
+// Package integration provides black-box tests that run against a live stack.
+// These tests require a running API and are gated by the "integration" build tag.
 package integration
 
 import (
@@ -11,6 +13,8 @@ import (
 	"testing"
 )
 
+// TestNoDuplicateCodes fires N concurrent link-creation requests against a live
+// instance and asserts that every returned code is unique.
 func TestNoDuplicateCodes(t *testing.T) {
 	const (
 		N        = 1000

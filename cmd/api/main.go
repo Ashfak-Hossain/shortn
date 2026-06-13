@@ -62,7 +62,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	// pgxpool. New establishes the configuration but connects lazily.
+	// pgxpool.New establishes the configuration but connects lazily.
 	// We mandate an immediate Ping to ensure the database is reachable on startup,
 	// preventing the application from accepting traffic when the DB is down.
 	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
