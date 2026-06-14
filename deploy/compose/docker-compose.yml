@@ -46,6 +46,32 @@ services:
         'up',
       ]
 
+  redpanda:
+    image: redpandadata/redpanda:v26.1.10
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container # single-node dev defaults; skips prod preflight checks
+      - --smp=1 # 1 core - keep the local footprint tiny
+      # The dual-listener gotcha. A Kafka client connects to a bootstrap address, then the
+      # broker hands back the *advertised* address to use for real traffic. So we advertise
+      # TWO: containers on the compose network use redpanda:9092; my machine uses
+      # localhost:19092. Advertise the wrong one and clients connect, then hang.
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+    ports:
+      - '19092:19092' # external Kafka API
+      - '9644:9644' # admin + metrics
+    volumes:
+      # Unlike redis, the log MUST persist: undelivered clicks live here. Wiping this
+      # loses events the analytics consumer hasn't drained yet.
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ['CMD-SHELL', 'rpk cluster health | grep -q "Healthy:.*true"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api-1:
     build:
       context: ../..
@@ -128,3 +154,4 @@ services:
 
 volumes:
   pgdata:
+  redpanda-data:
