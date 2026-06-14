@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 
 	"github.com/Ashfak-Hossain/shortn/internal/cache"
 	"github.com/Ashfak-Hossain/shortn/internal/config"
+	"github.com/Ashfak-Hossain/shortn/internal/events"
 	httpapi "github.com/Ashfak-Hossain/shortn/internal/http"
 	"github.com/Ashfak-Hossain/shortn/internal/idgen"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
@@ -115,7 +117,17 @@ func main() {
 	cachingStore := cache.NewCachingStore(st, cache.New(rdb), cacheTTL, logger)
 	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
 
-	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID)
+	// Build the Kafka publisher. Like the pgx pool and redis client, the franz-go
+	// client connects lazily, so this only errors on bad config — a broker that is *down*
+	// surfaces later at Publish time (logged, non-fatal), never here.
+	pub, err := events.NewKafkaPublisher(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic)
+	if err != nil {
+		logger.Error("failed to create kafka publisher", "err", err)
+		os.Exit(1)
+	}
+	defer pub.Close()
+
+	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID, pub)
 
 	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
 	// and prevent resource exhaustion from stale or malicious client connections.

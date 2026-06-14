@@ -10,18 +10,22 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
+	"github.com/Ashfak-Hossain/shortn/internal/events"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // handler serves as the central dependency container for all API routes.
 // It holds the domain service and logger so they can be shared safely
 // across concurrent HTTP requests.
 type handler struct {
-	svc    *shortener.Service
-	pinger Pinger
-	logger *slog.Logger
+	svc       *shortener.Service
+	pinger    Pinger
+	logger    *slog.Logger
+	publisher Publisher
 }
 
 // createRequest defines the expected JSON payload for link creation.
@@ -106,6 +110,22 @@ func (h *handler) redirect(w http.ResponseWriter, r *http.Request) {
 	// would cause future visits to bypass our server entirely, silently breaking
 	// our ability to track click analytics.
 	http.Redirect(w, r, link.LongURL, http.StatusFound)
+
+	// We publish the click only after the redirect is on the wire, so analytics
+	// never adds latency to the user's request. A publish failure (e.g. Redpanda
+	// down) is logged and swallowed: the redirect already succeeded, and
+	// click-tracking is best-effort — never a reason to fail the user's request.
+	event := events.LinkClicked{
+		EventID:   uuid.NewString(),
+		Code:      code,
+		Timestamp: time.Now().UTC(),
+		Referrer:  r.Referer(),
+		UserAgent: r.UserAgent(),
+		Version:   1,
+	}
+	if err := h.publisher.Publish(r.Context(), event); err != nil {
+		h.logger.Error("publish click event failed", "err", err, "code", code)
+	}
 }
 
 // shortURL dynamically constructs the absolute, shortened URL string.
