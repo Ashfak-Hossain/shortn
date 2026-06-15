@@ -28,7 +28,7 @@ type Publisher interface {
 
 // NewRouter returns a fully configured [http.Handler] with all application routes registered.
 // The instanceID value is attached to every response as the X-Served-By header.
-func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string, publisher Publisher) http.Handler {
+func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string, requestTimeout time.Duration, publisher Publisher) http.Handler {
 	// We bind the injected deps to our handler struct so they are
 	// safely accessible to the individual route methods.
 	h := &handler{svc: svc, pinger: pinger, logger: logger, publisher: publisher}
@@ -36,6 +36,7 @@ func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, insta
 	router := chi.NewRouter()
 
 	router.Use(ServedByMiddleware(instanceID))
+	router.Use(TimeoutMiddleware(requestTimeout))
 
 	// Op endpoints
 	router.Get("/healthz", healthz)

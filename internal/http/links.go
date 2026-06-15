@@ -78,16 +78,18 @@ func (h *handler) createLink(w http.ResponseWriter, r *http.Request) {
 
 	link, err := h.svc.Create(r.Context(), req.URL)
 	if err != nil {
-		// We translate safe, expected domain errors into 4xx client errors
-		// so the user knows how to correct their request.
 		if errors.Is(err, shortener.ErrInvalidURL) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		// For unhandled internal failures, we log the exact error for debugging,
-		// but we purposefully return a generic 500 response to the client to
-		// prevent leaking sensitive system or database details.
+		// A blown request budget is the dependency's fault, not the client's, so
+		//  503 (transient) rather than 500 — that's the signal a caller's retry
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusServiceUnavailable, "request timed out")
+			return
+		}
+
 		h.logger.Error("create link failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not create link")
 		return
@@ -108,9 +110,12 @@ func (h *handler) redirect(w http.ResponseWriter, r *http.Request) {
 
 	link, err := h.svc.Resolve(r.Context(), code)
 	if err != nil {
-		// We translate the domain's 'Not Found' sentinel into a standard 404.
 		if errors.Is(err, shortener.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "no link for that code")
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusServiceUnavailable, "request timed out")
 			return
 		}
 		h.logger.Error("resolve link failed", "err", err, "code", code)
@@ -164,10 +169,15 @@ func (h *handler) stats(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	s, err := h.svc.Stats(r.Context(), code)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusServiceUnavailable, "request timed out")
+			return
+		}
 		h.logger.Error("get stats failed", "err", err, "code", code)
 		writeError(w, http.StatusInternalServerError, "could not get stats")
 		return
 	}
+
 	resp := statsResponse{Code: s.Code, Total: s.Total}
 	for _, b := range s.Series {
 		resp.Series = append(resp.Series, bucketResponse{Bucket: b.Bucket, Count: b.Count})

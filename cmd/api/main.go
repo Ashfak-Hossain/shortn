@@ -35,6 +35,12 @@ import (
 // even if an invalidation were ever missed.
 const cacheTTL = time.Hour
 
+// requestTimeout is the hard ceiling for any single HTTP request's downstream
+// work. A redirect should resolve in single-digit milliseconds, so 2s is a
+// failure ceiling — not a target — that stops one frozen dependency from
+// parking goroutines and draining the pgx pool.
+const requestTimeout = 2 * time.Second
+
 func main() {
 	// Failing fast here prevents the application from booting in an invalid state.
 	cfg, err := config.Load()
@@ -123,7 +129,7 @@ func main() {
 	}
 	defer pub.Close()
 
-	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID, pub)
+	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID, requestTimeout, pub)
 
 	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
 	// and prevent resource exhaustion from stale or malicious client connections.
