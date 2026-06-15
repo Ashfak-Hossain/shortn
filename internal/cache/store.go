@@ -25,10 +25,10 @@ const negativeTTL = 30 * time.Second
 // it was handed the raw Postgres store or this cache-wrapped one.
 type CachingStore struct {
 	next  shortener.LinkStore // the wrapped store (Postgres) — the source of truth
-	cache *Client
-	ttl   time.Duration
-	log   *slog.Logger       // non-fatal cache failures only
-	group singleflight.Group // collapses concurrent misses for the same code into one DB load
+	cache *Client             // redis client
+	ttl   time.Duration       // expiry for cache entries (real links)
+	log   *slog.Logger        // non-fatal cache failures only
+	group singleflight.Group  // collapses concurrent misses for the same code into one DB load
 }
 
 // Compile-time assertion that *CachingStore satisfies LinkStore.
@@ -70,7 +70,7 @@ func (s *CachingStore) GetByCode(ctx context.Context, code string) (*shortener.L
 	// store load. The first goroutine ("leader") runs the func; the rest block and
 	// share its result. group.Do keys on the code, so different codes don't block.
 	v, err, _ := s.group.Do(code, func() (any, error) {
-		return s.loadAndCache(ctx, code)
+		return s.loadAndCache(ctx, code) // load from db and populate cache;
 	})
 	if err != nil {
 		return nil, err
