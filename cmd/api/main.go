@@ -25,6 +25,7 @@ import (
 	"github.com/Ashfak-Hossain/shortn/internal/events"
 	httpapi "github.com/Ashfak-Hossain/shortn/internal/http"
 	"github.com/Ashfak-Hossain/shortn/internal/idgen"
+	"github.com/Ashfak-Hossain/shortn/internal/ratelimit"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/Ashfak-Hossain/shortn/internal/store"
 )
@@ -129,7 +130,19 @@ func main() {
 	}
 	defer pub.Close()
 
-	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID, requestTimeout, pub)
+	burst, err := strconv.Atoi(cfg.RateLimitBurst)
+	if err != nil || burst < 1 {
+		logger.Error("RATE_LIMIT_BURST must be a positive integer", "value", cfg.RateLimitBurst)
+		os.Exit(1)
+	}
+	rps, err := strconv.Atoi(cfg.RateLimitRPS)
+	if err != nil || rps < 1 {
+		logger.Error("RATE_LIMIT_RPS must be a positive integer", "value", cfg.RateLimitRPS)
+		os.Exit(1)
+	}
+	limiter := ratelimit.New(rdb, burst, rps)
+
+	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID, requestTimeout, limiter, pub)
 
 	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
 	// and prevent resource exhaustion from stale or malicious client connections.

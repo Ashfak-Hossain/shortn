@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Ashfak-Hossain/shortn/internal/events"
+	"github.com/Ashfak-Hossain/shortn/internal/ratelimit"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 )
 
@@ -28,8 +29,8 @@ type Publisher interface {
 
 // NewRouter returns a fully configured [http.Handler] with all application routes registered.
 // The instanceID value is attached to every response as the X-Served-By header.
-func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string, requestTimeout time.Duration, publisher Publisher) http.Handler {
-	// We bind the injected deps to our handler struct so they are
+func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string, requestTimeout time.Duration, limiter *ratelimit.Limiter, publisher Publisher) http.Handler {
+	// Bind the injected deps to our handler struct so they are
 	// safely accessible to the individual route methods.
 	h := &handler{svc: svc, pinger: pinger, logger: logger, publisher: publisher}
 
@@ -42,12 +43,17 @@ func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, insta
 	router.Get("/healthz", healthz)
 	router.Get("/readyz", h.readyz)
 
-	// API endpoints
-	router.Post("/api/links", h.createLink)
-	router.Get("/{code}", h.redirect)
+	// client-facing sits behind the rate limiter
+	router.Group(func(r chi.Router) {
+		r.Use(RateLimitMiddleware(limiter, logger))
 
-	// Analytics
-	router.Get("/api/links/{code}/stats", h.stats)
+		// API endpoints
+		r.Post("/api/links", h.createLink)
+		r.Get("/{code}", h.redirect)
+
+		// Analytics
+		r.Get("/api/links/{code}/stats", h.stats)
+	})
 
 	return router
 }
