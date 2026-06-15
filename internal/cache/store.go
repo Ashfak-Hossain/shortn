@@ -46,6 +46,13 @@ func (s *CachingStore) Create(ctx context.Context, link *shortener.Link) error {
 	return s.next.Create(ctx, link)
 }
 
+// GetStats implements [shortener.LinkStore]. Aggregate click stats aren't cached —
+// they change on every click and aren't on the redirect hot path — so this
+// delegates straight to the wrapped store.
+func (s *CachingStore) GetStats(ctx context.Context, code string) (shortener.Stats, error) {
+	return s.next.GetStats(ctx, code)
+}
+
 // GetByCode implements [shortener.LinkStore].
 // GetByCode serves from Redis on a hit, and on a miss collapses concurrent
 // lookups for the same code into a single store read via singleflight. Both

@@ -5,23 +5,28 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
+	"github.com/Ashfak-Hossain/shortn/internal/events"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // handler serves as the central dependency container for all API routes.
 // It holds the domain service and logger so they can be shared safely
 // across concurrent HTTP requests.
 type handler struct {
-	svc    *shortener.Service
-	pinger Pinger
-	logger *slog.Logger
+	svc       *shortener.Service
+	pinger    Pinger
+	logger    *slog.Logger
+	publisher Publisher
 }
 
 // createRequest defines the expected JSON payload for link creation.
@@ -37,6 +42,18 @@ type createResponse struct {
 	Code     string `json:"code"`
 	ShortURL string `json:"short_url"`
 	LongURL  string `json:"long_url"`
+}
+
+// statsResponse is the JSON shape for GET /api/links/{code}/stats.
+type statsResponse struct {
+	Code   string           `json:"code"`
+	Total  int64            `json:"total"`
+	Series []bucketResponse `json:"series"`
+}
+
+type bucketResponse struct {
+	Bucket time.Time `json:"bucket"`
+	Count  int64     `json:"count"`
 }
 
 // createLink handles the POST /api/links endpoint.
@@ -106,6 +123,24 @@ func (h *handler) redirect(w http.ResponseWriter, r *http.Request) {
 	// would cause future visits to bypass our server entirely, silently breaking
 	// our ability to track click analytics.
 	http.Redirect(w, r, link.LongURL, http.StatusFound)
+
+	// We publish the click after the redirect is on the wire, in a goroutine with a
+	// background context, so analytics never adds latency to the user's request —
+	// even if Redpanda is down. A publish failure is logged and swallowed: the
+	// redirect already succeeded, and click-tracking is best-effort.
+	event := events.LinkClicked{
+		EventID:   uuid.NewString(),
+		Code:      code,
+		Timestamp: time.Now().UTC(),
+		Referrer:  r.Referer(),
+		UserAgent: r.UserAgent(),
+		Version:   1,
+	}
+	go func() {
+		if err := h.publisher.Publish(context.Background(), event); err != nil {
+			h.logger.Error("publish click event failed", "err", err, "code", code)
+		}
+	}()
 }
 
 // shortURL dynamically constructs the absolute, shortened URL string.
@@ -122,4 +157,20 @@ func shortURL(r *http.Request, code string) string {
 	// relying on a hardcoded configuration variable. This ensures the application
 	// remains entirely portable across local dev, staging, and prod.
 	return fmt.Sprintf("%s://%s/%s", scheme, r.Host, code)
+}
+
+// stats handles GET /api/links/{code}/stats.
+func (h *handler) stats(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	s, err := h.svc.Stats(r.Context(), code)
+	if err != nil {
+		h.logger.Error("get stats failed", "err", err, "code", code)
+		writeError(w, http.StatusInternalServerError, "could not get stats")
+		return
+	}
+	resp := statsResponse{Code: s.Code, Total: s.Total}
+	for _, b := range s.Series {
+		resp.Series = append(resp.Series, bucketResponse{Bucket: b.Bucket, Count: b.Count})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

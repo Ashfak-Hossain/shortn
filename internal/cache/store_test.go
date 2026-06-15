@@ -51,6 +51,10 @@ func (f *fakeStore) GetByCode(_ context.Context, code string) (*shortener.Link, 
 	return link, nil
 }
 
+func (f *fakeStore) GetStats(_ context.Context, _ string) (shortener.Stats, error) {
+	return shortener.Stats{}, nil
+}
+
 // newTestStore wires a CachingStore over the fake store, backed by in-process Redis.
 // It returns the decorator and the miniredis handle (so a test can inspect cached
 // keys or kill Redis to exercise fail-open).

@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Ashfak-Hossain/shortn/internal/events"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 )
 
@@ -20,12 +21,17 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
+// Publisher publishes a click event. Implemented by *events.KafkaPublisher.
+type Publisher interface {
+	Publish(ctx context.Context, e events.LinkClicked) error
+}
+
 // NewRouter returns a fully configured [http.Handler] with all application routes registered.
 // The instanceID value is attached to every response as the X-Served-By header.
-func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string) http.Handler {
+func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string, publisher Publisher) http.Handler {
 	// We bind the injected deps to our handler struct so they are
 	// safely accessible to the individual route methods.
-	h := &handler{svc: svc, pinger: pinger, logger: logger}
+	h := &handler{svc: svc, pinger: pinger, logger: logger, publisher: publisher}
 
 	router := chi.NewRouter()
 
@@ -38,6 +44,9 @@ func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, insta
 	// API endpoints
 	router.Post("/api/links", h.createLink)
 	router.Get("/{code}", h.redirect)
+
+	// Analytics
+	router.Get("/api/links/{code}/stats", h.stats)
 
 	return router
 }
