@@ -2,12 +2,12 @@
 
 A distributed URL shortener built as a practice project of distributed systems and DevOps concepts.
 
-**Stack:** Go · PostgreSQL · Redis · Docker · GitHub Actions · React
+**Stack:** Go · PostgreSQL · Redis · Redpanda (Kafka) · nginx · Docker · GitHub Actions · React
 
 ## Status
 
-A Postgres-backed URL shortener with a Redis read-through cache: `POST /api/links` returns a short code, `GET /{code}` 302-redirects to the original URL (served from Redis on a hit, Postgres on a miss), data persists in PostgreSQL, and the whole stack runs with `docker compose up`. Clean layered architecture (`http` → domain → `store`), with the cache wired in as a `LinkStore` decorator so the domain never learns Redis exists; cache failures fail open (degrade to Postgres), and concurrent misses are collapsed with `singleflight`. Unit + integration (testcontainers) tests, green CI.
-Next: **Phase 3 — distributed IDs & horizontal scaling**.
+A distributed, event-driven URL shortener. `POST /api/links` returns a short code; `GET /{code}` 302-redirects — served from a Redis read-through cache (Postgres on a miss), behind an **nginx** load balancer across multiple stateless API instances. Short codes come from a coordination-free **Snowflake-style** generator and are obfuscated with **sqids** so they're non-sequential. Each click publishes a `LinkClicked` event to **Redpanda** (Kafka API) and returns immediately; a separate `cmd/analytics` consumer drains the log into Postgres with **exactly-once processing** — the Kafka offset is committed in the same transaction as the click, so a crash or restart never loses or double-counts. Clean layered architecture (`http` → domain → `store`); the cache and event publisher sit behind interfaces so the domain never learns Redis or Kafka exists, and cache/broker failures fail open. Unit + integration (testcontainers) tests, green CI; runs with `docker compose up`.
+Next: **Phase 5 — resilience (rate limiting, timeouts, circuit breakers, chaos)**.
 
 ## Run
 
