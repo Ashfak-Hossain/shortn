@@ -83,10 +83,8 @@ func (h *handler) createLink(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// A blown request budget is the dependency's fault, not the client's, so
-		//  503 (transient) rather than 500 — that's the signal a caller's retry
-		if errors.Is(err, context.DeadlineExceeded) {
-			writeError(w, http.StatusServiceUnavailable, "request timed out")
+		if serviceUnavailable(err) {
+			writeError(w, http.StatusServiceUnavailable, "service temporarily unavailable")
 			return
 		}
 
@@ -114,8 +112,8 @@ func (h *handler) redirect(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "no link for that code")
 			return
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			writeError(w, http.StatusServiceUnavailable, "request timed out")
+		if serviceUnavailable(err) {
+			writeError(w, http.StatusServiceUnavailable, "service temporarily unavailable")
 			return
 		}
 		h.logger.Error("resolve link failed", "err", err, "code", code)
@@ -164,13 +162,20 @@ func shortURL(r *http.Request, code string) string {
 	return fmt.Sprintf("%s://%s/%s", scheme, r.Host, code)
 }
 
+// serviceUnavailable reports whether err is a transient "shed load" condition —
+// a blown request deadline or an open dependency breaker — that should answer
+// 503 rather than a generic 500.
+func serviceUnavailable(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, shortener.ErrUnavailable)
+}
+
 // stats handles GET /api/links/{code}/stats.
 func (h *handler) stats(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	s, err := h.svc.Stats(r.Context(), code)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			writeError(w, http.StatusServiceUnavailable, "request timed out")
+		if serviceUnavailable(err) {
+			writeError(w, http.StatusServiceUnavailable, "service temporarily unavailable")
 			return
 		}
 		h.logger.Error("get stats failed", "err", err, "code", code)

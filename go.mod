@@ -12,6 +12,8 @@ require (
 	golang.org/x/sync v0.21.0
 )
 
+require github.com/sony/gobreaker v1.0.0 // indirect
+
 require (
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/twmb/franz-go v1.21.3

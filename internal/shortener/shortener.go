@@ -20,9 +20,10 @@ const maxCreateRetries = 5
 // without leaking underlying implementation details (like SQL or network errors)
 // to the external caller.
 var (
-	ErrNotFound   = errors.New("link not found")
-	ErrCodeExists = errors.New("code already exists")
-	ErrInvalidURL = errors.New("invalid url")
+	ErrNotFound    = errors.New("link not found")
+	ErrCodeExists  = errors.New("code already exists")
+	ErrInvalidURL  = errors.New("invalid url")
+	ErrUnavailable = errors.New("service temporarily unavailable")
 )
 
 // Link represents a single URL mapping. It is the core business entity

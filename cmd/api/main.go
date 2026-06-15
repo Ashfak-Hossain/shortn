@@ -26,6 +26,7 @@ import (
 	httpapi "github.com/Ashfak-Hossain/shortn/internal/http"
 	"github.com/Ashfak-Hossain/shortn/internal/idgen"
 	"github.com/Ashfak-Hossain/shortn/internal/ratelimit"
+	"github.com/Ashfak-Hossain/shortn/internal/resilience"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/Ashfak-Hossain/shortn/internal/store"
 )
@@ -117,7 +118,8 @@ func main() {
 	}
 
 	st := store.New(pool)
-	cachingStore := cache.NewCachingStore(st, cache.New(rdb), cacheTTL, logger)
+	resilient := resilience.NewResilientStore(st, logger)
+	cachingStore := cache.NewCachingStore(resilient, cache.New(rdb), cacheTTL, logger)
 	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
 
 	// Like the pgx pool and redis client, the franz-go client connects lazily, so this
