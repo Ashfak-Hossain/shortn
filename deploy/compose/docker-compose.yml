@@ -153,6 +153,27 @@ services:
       KAFKA_BROKERS: redpanda:9092 # internal listener — these are containers
       KAFKA_TOPIC: shortn.clicks
 
+  analytics:
+    build:
+      context: ../..
+      dockerfile: Dockerfile # same parameterized Dockerfile, different SERVICE
+      args:
+        SERVICE: analytics
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      LOG_LEVEL: info
+      ENV: dev
+      DATABASE_URL: postgres://dev:dev@postgres:5432/shortn?sslmode=disable
+      KAFKA_BROKERS: redpanda:9092 # internal listener — it's a container
+      KAFKA_TOPIC: shortn.clicks
+      KAFKA_GROUP: shortn-analytics
+
   nginx:
     image: nginx:alpine
     ports:

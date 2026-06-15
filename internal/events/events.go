@@ -35,6 +35,10 @@ func NewKafkaPublisher(brokers []string, topic string) (*KafkaPublisher, error) 
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
 		kgo.DefaultProduceTopic(topic),
+		// Bound how long a background publish keeps retrying when Redpanda is
+		// unreachable, so click-publish goroutines drain instead of piling up
+		// during an outage. Analytics is best-effort — a dropped click is fine.
+		kgo.RecordDeliveryTimeout(10*time.Second),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating kafka client: %w", err)

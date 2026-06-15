@@ -36,7 +36,6 @@ import (
 const cacheTTL = time.Hour
 
 func main() {
-	// Load application settings from the environment.
 	// Failing fast here prevents the application from booting in an invalid state.
 	cfg, err := config.Load()
 	if err != nil {
@@ -64,7 +63,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize a JSON logger for machine-readable output in prod.
+	// JSON format ensures machine-readable output in prod.
 	// We set this as the default logger so standard library logs capture the same format.
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: parseLevel(cfg.LogLevel),
@@ -79,7 +78,7 @@ func main() {
 		logger.Error("failed to create db pool", "err", err)
 		os.Exit(1)
 	}
-	defer pool.Close() // scheduled to run when main() returns
+	defer pool.Close()
 
 	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelPing()
@@ -88,8 +87,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Build the Redis client. redis.ParseURL turns the DSN into options
-	// (pool size, db index, etc.); go-redis connects lazily on first use.
+	// redis.ParseURL turns the DSN into options (pool size, db index, etc.); go-redis connects lazily on first use.
 	opts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
 		logger.Error("invalid REDIS_URL", "err", err)
@@ -111,15 +109,13 @@ func main() {
 		logger.Warn("redis not reachable at startup; serving uncached from postgres", "err", err)
 	}
 
-	// We instantiate the core domain logic, injecting the necessary data store
-	// and utility dependencies to compose the application layers.
 	st := store.New(pool)
 	cachingStore := cache.NewCachingStore(st, cache.New(rdb), cacheTTL, logger)
 	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
 
-	// Build the Kafka publisher. Like the pgx pool and redis client, the franz-go
-	// client connects lazily, so this only errors on bad config — a broker that is *down*
-	// surfaces later at Publish time (logged, non-fatal), never here.
+	// Like the pgx pool and redis client, the franz-go client connects lazily, so this
+	// only errors on bad config — a broker that is *down* surfaces later at Publish time
+	// (logged, non-fatal), never here.
 	pub, err := events.NewKafkaPublisher(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic)
 	if err != nil {
 		logger.Error("failed to create kafka publisher", "err", err)
@@ -140,8 +136,7 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Run the HTTP server in a separate goroutine so the main thread remains unblocked
-	// to listen for OS interrupt signals.
+	// A separate goroutine leaves the main thread free to block on OS signals below.
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server failed", "err", err)
@@ -150,8 +145,7 @@ func main() {
 	}()
 	logger.Info("server started", "addr", addr, "env", cfg.Env)
 
-	// Graceful Shutdown Handling
-	// Block the main thread until a SIGINT (Ctrl+C) or SIGTERM (Docker/K8s shutdown) is received.
+	// Block until SIGINT (Ctrl+C) or SIGTERM (Docker/K8s stop).
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig

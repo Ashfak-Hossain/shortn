@@ -44,6 +44,8 @@ type LinkStore interface {
 	Create(ctx context.Context, link *Link) error
 	// GetByCode retrieves a link by its unique identifier.
 	GetByCode(ctx context.Context, code string) (*Link, error)
+	// GetStats returns the click analytics for a code.
+	GetStats(ctx context.Context, code string) (Stats, error)
 }
 
 // IDGenerator defines the contract for producing unique identifiers.
@@ -57,6 +59,19 @@ type IDGenerator interface {
 type Service struct {
 	store LinkStore
 	idgen IDGenerator
+}
+
+// Stats is the click analytics for a single short code.
+type Stats struct {
+	Code   string
+	Total  int64
+	Series []ClickBucket
+}
+
+// ClickBucket is the number of clicks within one time bucket.
+type ClickBucket struct {
+	Bucket time.Time
+	Count  int64
 }
 
 // NewService initializes a new domain service with its required dependencies.
@@ -105,6 +120,11 @@ func (s *Service) Create(ctx context.Context, rawURL string) (*Link, error) {
 // It returns ErrNotFound if the code does not exist in the system.
 func (s *Service) Resolve(ctx context.Context, code string) (*Link, error) {
 	return s.store.GetByCode(ctx, code)
+}
+
+// Stats returns the click analytics for a short code.
+func (s *Service) Stats(ctx context.Context, code string) (Stats, error) {
+	return s.store.GetStats(ctx, code)
 }
 
 // normalizeURL trims whitespace, forces a valid structure, and ensures the

@@ -1,4 +1,4 @@
-.PHONY: help run build test lint docker migrate-up migrate-down up down ps logs redpanda topics rpk
+.PHONY: help run run-analytics build test test-integration lint docker migrate-up migrate-down up down ps logs redpanda topics rpk
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -10,11 +10,17 @@ help: ## list available targets (this menu)
 run: ## run the API locally
 	go run ./cmd/api
 
+run-analytics: ## run the analytics consumer locally
+	go run ./cmd/analytics
+
 build: ## compile everything
 	go build ./...
 
 test: ## run all tests
 	go test ./...
+
+test-integration: ## run integration tests (real Postgres via testcontainers; needs Docker)
+	go test -tags=integration ./...
 
 lint: ## go vet + golangci-lint
 	golangci-lint run

@@ -30,9 +30,14 @@ func startPostgres(t *testing.T) *pgxpool.Pool {
 	// We use Testcontainers to spin up a real Postgres database via Docker.
 	// Testing against a real database (rather than mocking) guarantees that our SQL
 	// syntax, constraints, and pgx driver behaviors exactly match production.
-	schema := filepath.Join("..", "..", "migrations", "000001_create_links.up.sql")
+	migrationsDir := filepath.Join("..", "..", "migrations")
 	container, err := postgres.Run(ctx, "postgres:16",
-		postgres.WithInitScripts(schema),
+		// Apply migrations in order so integration tests run against the real, current
+		// schema (links + click_events + kafka_offsets), matching golang-migrate.
+		postgres.WithInitScripts(
+			filepath.Join(migrationsDir, "000001_create_links.up.sql"),
+			filepath.Join(migrationsDir, "000002_create_click_analytics.up.sql"),
+		),
 		postgres.WithDatabase("shortn"),
 		postgres.WithUsername("dev"),
 		postgres.WithPassword("dev"),

@@ -45,6 +45,9 @@ func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, insta
 	router.Post("/api/links", h.createLink)
 	router.Get("/{code}", h.redirect)
 
+	// Analytics
+	router.Get("/api/links/{code}/stats", h.stats)
+
 	return router
 }
 

@@ -16,6 +16,7 @@ type Config struct {
 	SqidsAlphabet string // SQIDS_ALPHABET — shuffled base62 alphabet; must never change after codes are issued
 	KafkaBrokers  string // Kafka brokers list, comma-separated, default "localhost:19092"
 	KafkaTopic    string // Kafka topic for events, default "shortn.clicks"
+	KafkaGroup    string // KAFKA_GROUP, consumer group name, default "shortn-analytics"
 }
 
 // Load reads the configuration from the environment variables, applying
@@ -32,6 +33,7 @@ func Load() (Config, error) {
 		SqidsAlphabet: getEnv("SQIDS_ALPHABET", "0aA1bB2cC3dD4eE5fF6gG7hH8iI9jJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ"),
 		KafkaBrokers:  getEnv("KAFKA_BROKERS", "localhost:19092"),
 		KafkaTopic:    getEnv("KAFKA_TOPIC", "shortn.clicks"),
+		KafkaGroup:    getEnv("KAFKA_GROUP", "shortn-analytics"),
 	}, nil
 }
 

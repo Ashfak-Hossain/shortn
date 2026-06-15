@@ -40,6 +40,12 @@ func (f *fakeStore) GetByCode(_ context.Context, code string) (*Link, error) {
 	return link, nil
 }
 
+// GetStats satisfies LinkStore. The domain method is a passthrough with no logic
+// to unit-test, so the fake returns empty stats.
+func (f *fakeStore) GetStats(_ context.Context, _ string) (Stats, error) {
+	return Stats{}, nil
+}
+
 // stubGen is a deterministic, mock implementation of the IDGenerator interface.
 // By yielding scripted codes in a specific order, we can reliably simulate
 // non-deterministic events (like random code collisions) in our test suite.
