@@ -24,7 +24,10 @@ import (
 	"github.com/Ashfak-Hossain/shortn/internal/config"
 	"github.com/Ashfak-Hossain/shortn/internal/events"
 	httpapi "github.com/Ashfak-Hossain/shortn/internal/http"
+	"github.com/Ashfak-Hossain/shortn/internal/idempotency"
 	"github.com/Ashfak-Hossain/shortn/internal/idgen"
+	"github.com/Ashfak-Hossain/shortn/internal/ratelimit"
+	"github.com/Ashfak-Hossain/shortn/internal/resilience"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/Ashfak-Hossain/shortn/internal/store"
 )
@@ -34,6 +37,16 @@ import (
 // hit the cache, short enough that an edited/deleted link self-heals quickly
 // even if an invalidation were ever missed.
 const cacheTTL = time.Hour
+
+// requestTimeout is the hard ceiling for any single HTTP request's downstream
+// work. A redirect should resolve in single-digit milliseconds, so 2s is a
+// failure ceiling — not a target — that stops one frozen dependency from
+// parking goroutines and draining the pgx pool.
+const requestTimeout = 2 * time.Second
+
+// idempotencyTTL is how long an Idempotency-Key is remembered — long enough to
+// cover client retries, short enough to self-clean.
+const idempotencyTTL = 24 * time.Hour
 
 func main() {
 	// Failing fast here prevents the application from booting in an invalid state.
@@ -93,6 +106,14 @@ func main() {
 		logger.Error("invalid REDIS_URL", "err", err)
 		os.Exit(1)
 	}
+	// go-redis defaults to a 3s ReadTimeout.These short, explicit timeouts make a hung Redis
+	// fail fast so callers fail open (serve from Postgres, skip the rate limit) well
+	// within the request budget. Local Redis answers in well under a millisecond, so
+	// this is huge headroom for normal operation.
+	opts.DialTimeout = 300 * time.Millisecond
+	opts.ReadTimeout = 200 * time.Millisecond
+	opts.WriteTimeout = 200 * time.Millisecond
+	opts.PoolTimeout = 300 * time.Millisecond
 	rdb := redis.NewClient(opts)
 	defer func() {
 		if err := rdb.Close(); err != nil {
@@ -110,7 +131,8 @@ func main() {
 	}
 
 	st := store.New(pool)
-	cachingStore := cache.NewCachingStore(st, cache.New(rdb), cacheTTL, logger)
+	resilient := resilience.NewResilientStore(st, logger)
+	cachingStore := cache.NewCachingStore(resilient, cache.New(rdb), cacheTTL, logger)
 	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
 
 	// Like the pgx pool and redis client, the franz-go client connects lazily, so this
@@ -123,7 +145,30 @@ func main() {
 	}
 	defer pub.Close()
 
-	router := httpapi.NewRouter(svc, pool, logger, cfg.InstanceID, pub)
+	burst, err := strconv.Atoi(cfg.RateLimitBurst)
+	if err != nil || burst < 1 {
+		logger.Error("RATE_LIMIT_BURST must be a positive integer", "value", cfg.RateLimitBurst)
+		os.Exit(1)
+	}
+	rps, err := strconv.Atoi(cfg.RateLimitRPS)
+	if err != nil || rps < 1 {
+		logger.Error("RATE_LIMIT_RPS must be a positive integer", "value", cfg.RateLimitRPS)
+		os.Exit(1)
+	}
+	limiter := ratelimit.New(rdb, burst, rps)
+
+	idem := idempotency.New(rdb, idempotencyTTL)
+
+	router := httpapi.NewRouter(httpapi.RouterDeps{
+		Service:        svc,
+		Pinger:         pool,
+		Logger:         logger,
+		InstanceID:     cfg.InstanceID,
+		RequestTimeout: requestTimeout,
+		Limiter:        limiter,
+		Idempotency:    idem,
+		Publisher:      pub,
+	})
 
 	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
 	// and prevent resource exhaustion from stale or malicious client connections.

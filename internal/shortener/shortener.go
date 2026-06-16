@@ -20,25 +20,26 @@ const maxCreateRetries = 5
 // without leaking underlying implementation details (like SQL or network errors)
 // to the external caller.
 var (
-	ErrNotFound   = errors.New("link not found")
-	ErrCodeExists = errors.New("code already exists")
-	ErrInvalidURL = errors.New("invalid url")
+	ErrNotFound    = errors.New("link not found")
+	ErrCodeExists  = errors.New("code already exists")
+	ErrInvalidURL  = errors.New("invalid url")
+	ErrUnavailable = errors.New("service temporarily unavailable")
 )
 
 // Link represents a single URL mapping. It is the core business entity
 // passed between the HTTP, Domain, and Persistence layers.
 type Link struct {
-	ID         int64
-	Code       string
-	LongURL    string
-	CreatedAt  time.Time
-	ExpiresAt  *time.Time // We use a pointer to represent a missing timestamp 'nil', which maps cleanly to a NULL in SQL.
-	ClickCount int64
+	ID         int64      // DB primary key
+	Code       string     // The short code in the URL path.The public identifier
+	LongURL    string     // The destination to redirect
+	CreatedAt  time.Time  // Set by Postgres on insert
+	ExpiresAt  *time.Time // nil = never expires; pointer maps cleanly to SQL NULL.
+	ClickCount int64      // Counter column on the links row
 }
 
 // LinkStore defines the persistence contract for links.
 // By relying on this interface, the domain remains entirely agnostic to
-// whether the data lives in Postgres, Redis, or memory.
+// whether the data lives in Postgres or Redis
 type LinkStore interface {
 	// Create persists a new link to the underlying datastore.
 	Create(ctx context.Context, link *Link) error
@@ -57,21 +58,21 @@ type IDGenerator interface {
 // Service is the primary entry point for the domain.
 // It orchestrates interactions between the generator and the data store.
 type Service struct {
-	store LinkStore
-	idgen IDGenerator
+	store LinkStore   // Where links live (Postgres in prod, a fake in tests).
+	idgen IDGenerator // Produces short codes.
 }
 
 // Stats is the click analytics for a single short code.
 type Stats struct {
-	Code   string
-	Total  int64
-	Series []ClickBucket
+	Code   string        // Which short code these analytics belong to.
+	Total  int64         // Total clicks, summed from the click_events table — not Link.ClickCount.
+	Series []ClickBucket // Per-hour breakdown, oldest bucket first.
 }
 
-// ClickBucket is the number of clicks within one time bucket.
+// ClickBucket is the number of clicks within one time bucket. (3pm–4pm on June 1st)
 type ClickBucket struct {
-	Bucket time.Time
-	Count  int64
+	Bucket time.Time // Start of the hour window (Postgres date_trunc('hour', ts)).
+	Count  int64     // Clicks that fell inside that hour.
 }
 
 // NewService initializes a new domain service with its required dependencies.
