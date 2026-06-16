@@ -98,6 +98,12 @@ services:
       SQIDS_ALPHABET: "0aA1bB2cC3dD4eE5fF6gG7hH8iI9jJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ"
       KAFKA_BROKERS: redpanda:9092 # internal listener — these are containers
       KAFKA_TOPIC: shortn.clicks
+      # This dev/CI stack runs concurrency and load tests that all originate from one
+      # host IP, so they share a single bucket. Give the limiter headroom here so
+      # legitimate test bursts aren't throttled; the conservative production defaults
+      # (10 rps / 20 burst) stay in internal/config and the prod deploy.
+      RATE_LIMIT_RPS: "1000"
+      RATE_LIMIT_BURST: "2000"
 
   api-2:
     build:
@@ -125,6 +131,8 @@ services:
       SQIDS_ALPHABET: "0aA1bB2cC3dD4eE5fF6gG7hH8iI9jJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ"
       KAFKA_BROKERS: redpanda:9092 # internal listener — these are containers
       KAFKA_TOPIC: shortn.clicks
+      RATE_LIMIT_RPS: "1000" # dev/CI headroom — see api-1
+      RATE_LIMIT_BURST: "2000"
 
   api-3:
     build:
@@ -152,6 +160,8 @@ services:
       SQIDS_ALPHABET: "0aA1bB2cC3dD4eE5fF6gG7hH8iI9jJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ"
       KAFKA_BROKERS: redpanda:9092 # internal listener — these are containers
       KAFKA_TOPIC: shortn.clicks
+      RATE_LIMIT_RPS: "1000" # dev/CI headroom — see api-1
+      RATE_LIMIT_BURST: "2000"
 
   analytics:
     build:
