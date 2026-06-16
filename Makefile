@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker migrate-up migrate-down up down ps logs redpanda topics rpk
+.PHONY: help run run-analytics build test test-integration lint docker migrate-up migrate-down up down ps logs redpanda topics rpk chaos
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -48,6 +48,14 @@ ps: ## show running services and their health
 logs: ## follow logs; pick one with SVC=, e.g. make logs SVC=redpanda
 	$(COMPOSE) logs -f $(SVC)
 
+prune: ## remove all dangling images that are not being used by a running container
+	docker image prune
+
+##  This will remove: all stopped containers, all networks not used by at least one container, 
+##  all dangling images, unused build cache
+system-prune: 
+	docker system prune
+
 # ------------ redpanda / kafka ------------
 redpanda: ## start just Redpanda
 	$(COMPOSE) up -d redpanda
@@ -57,3 +65,7 @@ topics: ## create the click-events topic (no-op if it already exists)
 
 rpk: ## run any rpk command, e.g. make rpk ARGS="cluster info"
 	$(COMPOSE) exec redpanda rpk $(ARGS)
+
+# ------------ resilience ------------
+chaos: ## take each dependency down in turn and assert documented behavior (docs/runbook.md)
+	./scripts/chaos.sh

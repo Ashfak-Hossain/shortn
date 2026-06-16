@@ -68,7 +68,7 @@ func (s *CachingStore) GetByCode(ctx context.Context, code string) (*shortener.L
 
 	// Miss (or Redis down): collapse all concurrent misses for THIS code into one
 	// store load. The first goroutine ("leader") runs the func; the rest block and
-	// share its result. group.Do keys on the code, so different codes don't block.
+	// share its result. group. Do keys on the code, so different codes don't block.
 	v, err, _ := s.group.Do(code, func() (any, error) {
 		return s.loadAndCache(ctx, code) // load from db and populate cache;
 	})
@@ -111,10 +111,8 @@ func (s *CachingStore) loadAndCache(ctx context.Context, code string) (*shortene
 
 // Invalidate removes a code's cached entry so the next read repopulates from the
 // store. This is the seam a future link edit/delete handler calls to keep Redis
-// consistent with Postgres. No caller exists yet (Phase 1 exposes no mutation of
-// existing links) — it's here so the consistency contract is explicit and tested
-// ahead of need. Fail open: a Redis error is logged and returned, but the caller
-// can safely ignore it because the entry's TTL is the backstop.
+// consistent with Postgres. No caller exists yet. Fail open: a Redis error is logged
+// and returned, but the caller safely ignore it because the entry's TTL is the backstop.
 func (s *CachingStore) Invalidate(ctx context.Context, code string) error {
 	if err := s.cache.Del(ctx, key(code)); err != nil {
 		s.log.Warn("cache invalidate failed", "code", code, "err", err)

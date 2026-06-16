@@ -27,6 +27,7 @@ type handler struct {
 	pinger    Pinger
 	logger    *slog.Logger
 	publisher Publisher
+	idem      IdempotencyStore
 }
 
 // createRequest defines the expected JSON payload for link creation.
@@ -76,6 +77,17 @@ func (h *handler) createLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// fast path: a retry with a code which already recorded returns the original link
+	key := r.Header.Get("Idempotency-Key")
+	if key != "" {
+		if code, found, err := h.idem.Get(r.Context(), key); err != nil {
+			h.logger.Warn("Idempotency lookup failed; proceeding", "err", err) // fail open
+		} else if found {
+			h.respondWithCode(w, r, code)
+			return
+		}
+	}
+
 	link, err := h.svc.Create(r.Context(), req.URL)
 	if err != nil {
 		if errors.Is(err, shortener.ErrInvalidURL) {
@@ -93,11 +105,20 @@ func (h *handler) createLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, createResponse{
-		Code:     link.Code,
-		ShortURL: shortURL(r, link.Code),
-		LongURL:  link.LongURL,
-	})
+	// Record key -> code. if another req claimed this key first (won == false),
+	// return that winners link for concurrent retries same result
+	if key != "" {
+		if won, err := h.idem.Set(r.Context(), key, link.Code); err != nil {
+			h.logger.Warn("Idempotency save failed", "err", err) // fail open
+		} else if !won {
+			if code, found, _ := h.idem.Get(r.Context(), key); found {
+				h.respondWithCode(w, r, code)
+				return
+			}
+		}
+	}
+
+	writeCreatedLink(w, r, link)
 }
 
 // redirect handles the GET /{code} endpoint.
@@ -162,6 +183,16 @@ func shortURL(r *http.Request, code string) string {
 	return fmt.Sprintf("%s://%s/%s", scheme, r.Host, code)
 }
 
+// writeCreatedLink writes a link as a 201 Created response — the shared shape for
+// a fresh create and for an idempotent replay of an earlier one.
+func writeCreatedLink(w http.ResponseWriter, r *http.Request, link *shortener.Link) {
+	writeJSON(w, http.StatusCreated, createResponse{
+		Code:     link.Code,
+		ShortURL: shortURL(r, link.Code),
+		LongURL:  link.LongURL,
+	})
+}
+
 // serviceUnavailable reports whether err is a transient "shed load" condition —
 // a blown request deadline or an open dependency breaker — that should answer
 // 503 rather than a generic 500.
@@ -188,4 +219,15 @@ func (h *handler) stats(w http.ResponseWriter, r *http.Request) {
 		resp.Series = append(resp.Series, bucketResponse{Bucket: b.Bucket, Count: b.Count})
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// respondWithCode resolves an already-created code and writes it as a create response
+func (h *handler) respondWithCode(w http.ResponseWriter, r *http.Request, code string) {
+	link, err := h.svc.Resolve(r.Context(), code)
+	if err != nil {
+		h.logger.Error("idempotent replay: resolve failed", "code", code, "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load link")
+		return
+	}
+	writeCreatedLink(w, r, link)
 }

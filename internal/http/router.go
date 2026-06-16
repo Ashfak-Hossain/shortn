@@ -22,22 +22,41 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-// Publisher publishes a click event. Implemented by *events.KafkaPublisher.
+// Publisher publishes a click event. Implemented by [*events.KafkaPublisher].
 type Publisher interface {
 	Publish(ctx context.Context, e events.LinkClicked) error
 }
 
+// IdempotencyStore remembers which short code an Idempotency-Key produced, so a
+// retried create returns the same link. Implemented by [*idempotency.Store].
+type IdempotencyStore interface {
+	Get(ctx context.Context, key string) (code string, found bool, err error)
+	Set(ctx context.Context, key, code string) (won bool, err error)
+}
+
+// RouterDeps bundles everything NewRouter needs. A struct keeps the call site
+// readable as named fields instead of a long positional argument list.
+type RouterDeps struct {
+	Service        *shortener.Service
+	Pinger         Pinger
+	Logger         *slog.Logger
+	InstanceID     string // attached to every response as the X-Served-By header
+	RequestTimeout time.Duration
+	Limiter        *ratelimit.Limiter
+	Idempotency    IdempotencyStore
+	Publisher      Publisher
+}
+
 // NewRouter returns a fully configured [http.Handler] with all application routes registered.
-// The instanceID value is attached to every response as the X-Served-By header.
-func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, instanceID string, requestTimeout time.Duration, limiter *ratelimit.Limiter, publisher Publisher) http.Handler {
+func NewRouter(d RouterDeps) http.Handler {
 	// Bind the injected deps to our handler struct so they are
 	// safely accessible to the individual route methods.
-	h := &handler{svc: svc, pinger: pinger, logger: logger, publisher: publisher}
+	h := &handler{svc: d.Service, pinger: d.Pinger, logger: d.Logger, publisher: d.Publisher, idem: d.Idempotency}
 
 	router := chi.NewRouter()
 
-	router.Use(ServedByMiddleware(instanceID))
-	router.Use(TimeoutMiddleware(requestTimeout))
+	router.Use(ServedByMiddleware(d.InstanceID))
+	router.Use(TimeoutMiddleware(d.RequestTimeout))
 
 	// Op endpoints
 	router.Get("/healthz", healthz)
@@ -45,7 +64,7 @@ func NewRouter(svc *shortener.Service, pinger Pinger, logger *slog.Logger, insta
 
 	// client-facing sits behind the rate limiter
 	router.Group(func(r chi.Router) {
-		r.Use(RateLimitMiddleware(limiter, logger))
+		r.Use(RateLimitMiddleware(d.Limiter, d.Logger))
 
 		// API endpoints
 		r.Post("/api/links", h.createLink)
