@@ -195,6 +195,75 @@ services:
       - api-2
       - api-3
 
+  # ------------ observability stack ------------
+  # Direct export: Prometheus PULLS /metrics; the app PUSHES traces to Tempo over
+  # OTLP; Alloy tails container stdout and ships logs to Loki; Grafana reads all
+  # three. Config lives in ./observability/.
+
+  prometheus:
+    image: prom/prometheus:v3.12.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9090:9090"
+
+  tempo:
+    image: grafana/tempo:2.10.7
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200" # tempo query API (Grafana datasource)
+      - "4317:4317" # OTLP gRPC — app pushes spans here
+      - "4318:4318" # OTLP HTTP — app pushes spans here
+
+  loki:
+    image: grafana/loki:3.7.2
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/config.yaml:ro
+    ports:
+      - "3100:3100"
+
+  alloy:
+    image: grafana/alloy:v1.17.0
+    # dev-only: run as root so Alloy can read the Docker socket to discover
+    # containers. In k8s (Phase 7) this becomes a DaemonSet reading node logs.
+    user: root
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    ports:
+      - "12345:12345" # alloy's own UI
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    environment:
+      # Dev convenience: open Grafana with no login, full admin.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
 volumes:
   pgdata:
   redpanda-data:
+  tempo-data:

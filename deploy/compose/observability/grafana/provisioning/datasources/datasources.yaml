@@ -1,0 +1,44 @@
+# Grafana datasources, auto-provisioned on startup (ADR 0010).
+# Wired for correlation: Tempo "trace -> logs" jumps to Loki by trace ID, and
+# Loki "logs -> trace" jumps back to Tempo via the derived field.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Pull the trace_id out of our JSON log lines and link it to Tempo.
+      # (Becomes live once log lines carry trace_id in submodule 6.4.)
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"(\w+)"'
+          url: '${__value.raw}'
+          datasourceUid: tempo
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # From a span, jump to the logs around it in Loki.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: true
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
