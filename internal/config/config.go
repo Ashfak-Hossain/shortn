@@ -19,6 +19,7 @@ type Config struct {
 	KafkaGroup     string // KAFKA_GROUP, consumer group name, default "shortn-analytics"
 	RateLimitRPS   string // RATE_LIMIT_RPS, sustained requests/sec per client, default "10"
 	RateLimitBurst string // RATE_LIMIT_BURST, token-bucket capacity (max burst), default "20"
+	OTELEndpoint   string // OTEL_EXPORTER_OTLP_ENDPOINT — Tempo's OTLP/HTTP address; where traces are pushed
 }
 
 // Load reads the configuration from the environment variables, applying
@@ -38,6 +39,7 @@ func Load() (Config, error) {
 		KafkaGroup:     getEnv("KAFKA_GROUP", "shortn-analytics"),
 		RateLimitRPS:   getEnv("RATE_LIMIT_RPS", "10"),
 		RateLimitBurst: getEnv("RATE_LIMIT_BURST", "20"),
+		OTELEndpoint:   getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4318"),
 	}, nil
 }
 

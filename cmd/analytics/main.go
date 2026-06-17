@@ -7,7 +7,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/Ashfak-Hossain/shortn/internal/config"
 	"github.com/Ashfak-Hossain/shortn/internal/events"
+	"github.com/Ashfak-Hossain/shortn/internal/observability"
 	"github.com/Ashfak-Hossain/shortn/internal/store"
 )
 
@@ -36,6 +39,38 @@ func main() {
 		Level: parseLevel(cfg.LogLevel),
 	}))
 	slog.SetDefault(logger)
+
+	// Run a tiny server JUST for /metrics so Prometheus can scrape it.
+	providers, err := observability.Setup(context.Background(), observability.Config{
+		ServiceName:  "shortn-analytics",
+		InstanceID:   cfg.InstanceID,
+		OTLPEndpoint: cfg.OTELEndpoint,
+	})
+	if err != nil {
+		logger.Error("failed to init observability", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := providers.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("observability shutdown failed", "err", err)
+		}
+	}()
+
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", providers.MetricsHandler)
+	metricsSrv := &http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+	go func() {
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics server failed", "err", err)
+		}
+	}()
 
 	// Postgres is both the sink and the source of truth for progress, so an
 	// unreachable DB at startup is fatal (unlike the cache in the API).
@@ -126,6 +161,12 @@ func main() {
 				os.Exit(1)
 			}
 		}
+	}
+
+	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := metricsSrv.Shutdown(shutCtx); err != nil {
+		logger.Warn("metrics server shutdown failed", "err", err)
 	}
 
 	logger.Info("analytics consumer stopped cleanly")

@@ -45,6 +45,7 @@ type RouterDeps struct {
 	Limiter        *ratelimit.Limiter
 	Idempotency    IdempotencyStore
 	Publisher      Publisher
+	MetricsHandler http.Handler // promhttp handler; mounted at GET /metrics
 }
 
 // NewRouter returns a fully configured [http.Handler] with all application routes registered.
@@ -61,6 +62,9 @@ func NewRouter(d RouterDeps) http.Handler {
 	// Op endpoints
 	router.Get("/healthz", healthz)
 	router.Get("/readyz", h.readyz)
+
+	// prometheus scrapes this.
+	router.Method(http.MethodGet, "/metrics", d.MetricsHandler)
 
 	// client-facing sits behind the rate limiter
 	router.Group(func(r chi.Router) {

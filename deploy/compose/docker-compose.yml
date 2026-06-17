@@ -179,6 +179,7 @@ services:
     environment:
       LOG_LEVEL: info
       ENV: dev
+      INSTANCE_ID: analytics
       DATABASE_URL: postgres://dev:dev@postgres:5432/shortn?sslmode=disable
       KAFKA_BROKERS: redpanda:9092 # internal listener — it's a container
       KAFKA_TOPIC: shortn.clicks

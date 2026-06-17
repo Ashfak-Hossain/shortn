@@ -26,6 +26,7 @@ import (
 	httpapi "github.com/Ashfak-Hossain/shortn/internal/http"
 	"github.com/Ashfak-Hossain/shortn/internal/idempotency"
 	"github.com/Ashfak-Hossain/shortn/internal/idgen"
+	"github.com/Ashfak-Hossain/shortn/internal/observability"
 	"github.com/Ashfak-Hossain/shortn/internal/ratelimit"
 	"github.com/Ashfak-Hossain/shortn/internal/resilience"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
@@ -82,6 +83,26 @@ func main() {
 		Level: parseLevel(cfg.LogLevel),
 	}))
 	slog.SetDefault(logger)
+
+	// Initialise OpenTelemetry early so everything below can emit signals.
+	// The metric reader is local (no network); the trace exporter connects lazily,
+	// so an unreachable Tempo never blocks startup.
+	providers, err := observability.Setup(context.Background(), observability.Config{
+		ServiceName:  "shortn-api",
+		InstanceID:   cfg.InstanceID,
+		OTLPEndpoint: cfg.OTELEndpoint,
+	})
+	if err != nil {
+		logger.Error("failed to init observability", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := providers.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("observability shutdown failed", "err", err)
+		}
+	}()
 
 	// pgxpool.New establishes the configuration but connects lazily.
 	// We mandate an immediate Ping to ensure the database is reachable on startup,
@@ -168,6 +189,7 @@ func main() {
 		Limiter:        limiter,
 		Idempotency:    idem,
 		Publisher:      pub,
+		MetricsHandler: providers.MetricsHandler,
 	})
 
 	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
