@@ -104,6 +104,8 @@ services:
       # (10 rps / 20 burst) stay in internal/config and the prod deploy.
       RATE_LIMIT_RPS: "1000"
       RATE_LIMIT_BURST: "2000"
+      OTEL_EXPORTER_OTLP_ENDPOINT: tempo:4318 # traces push here; the localhost default is wrong inside a container
+      OTEL_SEMCONV_STABILITY_OPT_IN: http/dup # emit http.server.request.duration (seconds), not just the legacy ms metric
 
   api-2:
     build:
@@ -133,6 +135,8 @@ services:
       KAFKA_TOPIC: shortn.clicks
       RATE_LIMIT_RPS: "1000" # dev/CI headroom — see api-1
       RATE_LIMIT_BURST: "2000"
+      OTEL_EXPORTER_OTLP_ENDPOINT: tempo:4318
+      OTEL_SEMCONV_STABILITY_OPT_IN: http/dup
 
   api-3:
     build:
@@ -162,6 +166,8 @@ services:
       KAFKA_TOPIC: shortn.clicks
       RATE_LIMIT_RPS: "1000" # dev/CI headroom — see api-1
       RATE_LIMIT_BURST: "2000"
+      OTEL_EXPORTER_OTLP_ENDPOINT: tempo:4318
+      OTEL_SEMCONV_STABILITY_OPT_IN: http/dup
 
   analytics:
     build:
