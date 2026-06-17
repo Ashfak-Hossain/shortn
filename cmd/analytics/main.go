@@ -26,21 +26,32 @@ import (
 )
 
 func main() {
-	// Failing fast here prevents the application from booting in an invalid state.
+	// ============================================================
+	// CONFIGURATION
+	// ============================================================
+
+	// Fail fast so the consumer never boots in an invalid state.
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
 
-	// JSON format ensures machine-readable output in prod.
-	// We set this as the default logger so standard library logs capture the same format.
+	// ============================================================
+	// LOGGING
+	// ============================================================
+
+	// JSON output is machine-readable for prod. Registering it as the default
+	// logger means stdlib log calls share the same format.
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: parseLevel(cfg.LogLevel),
 	}))
 	slog.SetDefault(logger)
 
-	// Run a tiny server JUST for /metrics so Prometheus can scrape it.
+	// ============================================================
+	// OBSERVABILITY & METRICS SERVER
+	// ============================================================
+
 	providers, err := observability.Setup(context.Background(), observability.Config{
 		ServiceName:  "shortn-analytics",
 		InstanceID:   cfg.InstanceID,
@@ -58,6 +69,8 @@ func main() {
 		}
 	}()
 
+	// The consumer has no HTTP API, so we run a tiny server purely so Prometheus
+	// can scrape /metrics.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", providers.MetricsHandler)
 	metricsSrv := &http.Server{
@@ -71,6 +84,10 @@ func main() {
 			logger.Error("metrics server failed", "err", err)
 		}
 	}()
+
+	// ============================================================
+	// DATABASE (Postgres)
+	// ============================================================
 
 	// Postgres is both the sink and the source of truth for progress, so an
 	// unreachable DB at startup is fatal (unlike the cache in the API).
@@ -87,6 +104,10 @@ func main() {
 		logger.Error("database not reachable", "err", err)
 		os.Exit(1)
 	}
+
+	// ============================================================
+	// KAFKA CONSUMER
+	// ============================================================
 
 	st := store.New(pool)
 	group := cfg.KafkaGroup
@@ -132,10 +153,18 @@ func main() {
 	}
 	defer cl.Close()
 
+	// ============================================================
+	// SIGNAL HANDLING
+	// ============================================================
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	logger.Info("analytics consumer started", "group", group, "topic", topic, "brokers", cfg.KafkaBrokers)
+
+	// ============================================================
+	// CONSUME LOOP
+	// ============================================================
 
 	for {
 		fetches := cl.PollFetches(ctx)
@@ -153,15 +182,19 @@ func main() {
 		for !iter.Done() {
 			rec := iter.Next()
 			if err := process(ctx, pool, st, group, rec); err != nil {
-				// We must NOT advance past a record we failed to write, or that click is
-				// lost forever. Exit; on restart we seek from Postgres and reprocess this
-				// exact record (the ON CONFLICT makes any partial replay safe).
+				// Never advance past a record we failed to write, or that click is
+				// lost forever. Exit; on restart we seek from Postgres and reprocess
+				// this exact record (the ON CONFLICT makes any partial replay safe).
 				logger.Error("processing failed; exiting to preserve exactly-once",
 					"err", err, "partition", rec.Partition, "offset", rec.Offset)
 				os.Exit(1)
 			}
 		}
 	}
+
+	// ============================================================
+	// GRACEFUL SHUTDOWN
+	// ============================================================
 
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -198,7 +231,8 @@ func process(ctx context.Context, pool *pgxpool.Pool, st *store.Postgres, group 
 	return tx.Commit(ctx)
 }
 
-// parseLevel translates a string log level into slog.Level, defaulting to slog.LevelInfo.
+// parseLevel translates a string log level into slog.Level, defaulting to
+// slog.LevelInfo.
 func parseLevel(level string) slog.Level {
 	switch level {
 	case "debug":
