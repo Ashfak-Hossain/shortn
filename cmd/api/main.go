@@ -120,8 +120,8 @@ func main() {
 	// DATABASE (Postgres)
 	// ============================================================
 
-	// pgxpool connects lazily, so we Ping immediately: Postgres is a hard
-	// dependency, and we refuse to accept traffic if it is unreachable at startup.
+	// pgxpool connects lazily, so Ping immediately: Postgres is a hard dependency,
+	// and the service must refuse traffic when it is unreachable at startup.
 	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("failed to create db pool", "err", err)
@@ -163,7 +163,7 @@ func main() {
 	}()
 
 	// A Redis outage is NOT fatal — the cache is an optimization, not a dependency.
-	// We ping only to surface a warning and keep booting either way ("fail open").
+	// Ping only surfaces a warning; startup continues either way ("fail open").
 	redisPingCtx, cancelRedisPing := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelRedisPing()
 	if err := rdb.Ping(redisPingCtx).Err(); err != nil {
@@ -186,7 +186,7 @@ func main() {
 	// ============================================================
 
 	// Like the pgx pool and redis client, the franz-go client connects lazily, so
-	// this only errors on bad config — a broker that is *down* surfaces later at
+	// this only errors on bad config — a broker that is down surfaces later at
 	// Publish time (logged, non-fatal), never here.
 	pub, err := events.NewKafkaPublisher(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic)
 	if err != nil {

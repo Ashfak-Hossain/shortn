@@ -69,7 +69,7 @@ func main() {
 		}
 	}()
 
-	// The consumer has no HTTP API, so we run a tiny server purely so Prometheus
+	// The consumer has no HTTP API, so a tiny server runs purely so Prometheus
 	// can scrape /metrics.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", providers.MetricsHandler)
@@ -113,7 +113,7 @@ func main() {
 	group := cfg.KafkaGroup
 	topic := cfg.KafkaTopic
 
-	// On partition assignment, seek each partition to the offset we durably stored
+	// On partition assignment, seek each partition to the offset durably stored
 	// in Postgres — NOT Kafka's __consumer_offsets. Postgres owns progress, so this
 	// is what makes a restart resume exactly where the last committed tx left off.
 	onAssigned := func(ctx context.Context, cl *kgo.Client, assigned map[string][]int32) {
@@ -143,7 +143,7 @@ func main() {
 		kgo.SeedBrokers(strings.Split(cfg.KafkaBrokers, ",")...),
 		kgo.ConsumerGroup(group),
 		kgo.ConsumeTopics(topic),
-		kgo.DisableAutoCommit(), // we commit offsets to Postgres, never to Kafka
+		kgo.DisableAutoCommit(), // commit offsets to Postgres, never to Kafka
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.OnPartitionsAssigned(onAssigned),
 	)
@@ -182,9 +182,9 @@ func main() {
 		for !iter.Done() {
 			rec := iter.Next()
 			if err := process(ctx, pool, st, group, rec); err != nil {
-				// Never advance past a record we failed to write, or that click is
-				// lost forever. Exit; on restart we seek from Postgres and reprocess
-				// this exact record (the ON CONFLICT makes any partial replay safe).
+				// Never advance past a record that failed to write, or that click is
+				// lost forever. Exit; on restart the consumer seeks from Postgres and
+				// reprocesses this exact record (the ON CONFLICT makes any partial replay safe).
 				logger.Error("processing failed; exiting to preserve exactly-once",
 					"err", err, "partition", rec.Partition, "offset", rec.Offset)
 				os.Exit(1)
