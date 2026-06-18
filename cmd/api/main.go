@@ -31,6 +31,8 @@ import (
 	"github.com/Ashfak-Hossain/shortn/internal/resilience"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/Ashfak-Hossain/shortn/internal/store"
+	"github.com/exaring/otelpgx"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 )
 
 // cacheTTL is how long a resolved link stays in Redis before it self-expires.
@@ -122,7 +124,16 @@ func main() {
 
 	// pgxpool connects lazily, so Ping immediately: Postgres is a hard dependency,
 	// and the service must refuse traffic when it is unreachable at startup.
-	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	// Parse the DSN into a config so the OTel tracer can be attached before the
+	// pool is built.
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("invalid DATABASE_URL", "err", err)
+		os.Exit(1)
+	}
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		logger.Error("failed to create db pool", "err", err)
 		os.Exit(1)
@@ -156,6 +167,13 @@ func main() {
 	opts.WriteTimeout = 200 * time.Millisecond
 	opts.PoolTimeout = 300 * time.Millisecond
 	rdb := redis.NewClient(opts)
+	// One hook opens a child span per Redis command, so cache GET/SET (and the
+	// rate-limit checks that share this client) appear in the trace. Tracing isn't
+	// load-bearing, so a setup failure is a warning, not a fatal — same fail-open
+	// stance as Redis itself.
+	if err := redisotel.InstrumentTracing(rdb); err != nil {
+		logger.Warn("failed to instrument redis tracing", "err", err)
+	}
 	defer func() {
 		if err := rdb.Close(); err != nil {
 			logger.Warn("failed to close redis client", "err", err)

@@ -16,9 +16,9 @@ import (
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 )
 
-// fakeStore is an in-memory LinkStore that COUNTS GetByCode calls (so we can prove
-// the cache prevents store hits) and can DELAY each read (so we can open a
-// concurrency window for the singleflight test).
+// fakeStore is an in-memory LinkStore that counts GetByCode calls (to prove the
+// cache prevents store hits) and can delay each read (to open a concurrency
+// window for the singleflight test).
 type fakeStore struct {
 	mu     sync.Mutex
 	byCode map[string]*shortener.Link
