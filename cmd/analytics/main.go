@@ -20,6 +20,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/Ashfak-Hossain/shortn/internal/config"
 	"github.com/Ashfak-Hossain/shortn/internal/events"
@@ -172,6 +175,25 @@ func main() {
 	defer cl.Close()
 
 	// ============================================================
+	// CONSUMER METRICS
+	// ============================================================
+
+	// These feed the Phase 6 dashboard. clicks_processed is throughput; lag is the
+	// backlog — what's been produced to a partition but not yet consumed — computed
+	// in the loop below from each partition's high watermark.
+	meter := otel.Meter("github.com/Ashfak-Hossain/shortn/cmd/analytics")
+	clicksProcessed, err := meter.Int64Counter("analytics.clicks.processed",
+		metric.WithDescription("Click events successfully recorded in Postgres."))
+	if err != nil {
+		logger.Warn("failed to create analytics.clicks.processed counter", "err", err)
+	}
+	consumerLag, err := meter.Int64Gauge("analytics.consumer.lag",
+		metric.WithDescription("Records produced to a partition but not yet consumed (high watermark - last consumed)."))
+	if err != nil {
+		logger.Warn("failed to create analytics.consumer.lag gauge", "err", err)
+	}
+
+	// ============================================================
 	// SIGNAL HANDLING
 	// ============================================================
 
@@ -196,26 +218,37 @@ func main() {
 			continue
 		}
 
-		iter := fetches.RecordIter()
-		for !iter.Done() {
-			rec := iter.Next()
-
-			// kotel's fetch hook already pulled the API's trace context out of the
-			// record headers into rec.Context, so this processing span is a child of
-			// the API's publish span — the insert + offset commit nest inside the same
-			// end-to-end trace.
-			procCtx, span := tracer.WithProcessSpan(rec)
-			err := process(procCtx, pool, st, group, rec)
-			span.End()
-			if err != nil {
-				// Never advance past a record that failed to write, or that click is
-				// lost forever. Exit; on restart the consumer seeks from Postgres and
-				// reprocesses this exact record (the ON CONFLICT makes any partial replay safe).
-				logger.Error("processing failed; exiting to preserve exactly-once",
-					"err", err, "partition", rec.Partition, "offset", rec.Offset)
-				os.Exit(1)
+		fetches.EachPartition(func(p kgo.FetchTopicPartition) {
+			for _, rec := range p.Records {
+				// kotel's fetch hook already pulled the API's trace context out of the
+				// record headers into rec.Context, so this processing span is a child of
+				// the API's publish span — the insert + offset commit nest inside the same
+				// end-to-end trace.
+				procCtx, span := tracer.WithProcessSpan(rec)
+				err := process(procCtx, pool, st, group, rec)
+				span.End()
+				if err != nil {
+					// Never advance past a record that failed to write, or that click is
+					// lost forever. Exit; on restart the consumer seeks from Postgres and
+					// reprocesses this exact record (the ON CONFLICT makes any partial replay safe).
+					logger.Error("processing failed; exiting to preserve exactly-once",
+						"err", err, "partition", rec.Partition, "offset", rec.Offset)
+					os.Exit(1)
+				}
+				clicksProcessed.Add(procCtx, 1)
 			}
-		}
+
+			// After draining this partition's batch, record how far behind the log end
+			// we still are. HighWatermark is the next offset the broker will assign, so
+			// (watermark - 1) is the newest record that exists; lag is the remainder.
+			if n := len(p.Records); n > 0 {
+				lag := p.HighWatermark - (p.Records[n-1].Offset + 1)
+				consumerLag.Record(ctx, lag, metric.WithAttributes(
+					attribute.String("topic", p.Topic),
+					attribute.Int("partition", int(p.Partition)),
+				))
+			}
+		})
 	}
 
 	// ============================================================

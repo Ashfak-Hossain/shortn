@@ -4,11 +4,12 @@
   "tags": ["shortn", "golden-signals"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "time": { "from": "now-15m", "to": "now" },
   "templating": { "list": [] },
   "annotations": { "list": [] },
+  "description": "RED golden signals built on http_server_duration_milliseconds. We deliberately use the MILLISECOND metric, not http_server_request_duration_seconds: the pinned otelhttp v0.60 in http/dup mode records millisecond values into the seconds-named histogram (a units bug), so the ms metric is the one that's actually correct.",
   "panels": [
     {
       "type": "row",
@@ -36,7 +37,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (http_route) (rate(http_server_request_duration_seconds_count{job=\"shortn-api\"}[$__rate_interval]))",
+          "expr": "sum by (http_route) (rate(http_server_duration_milliseconds_count{job=\"shortn-api\"}[$__rate_interval]))",
           "legendFormat": "{{http_route}}"
         }
       ]
@@ -71,7 +72,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"shortn-api\",http_response_status_code=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{job=\"shortn-api\"}[$__rate_interval])), 1)",
+          "expr": "sum(rate(http_server_duration_milliseconds_count{job=\"shortn-api\",http_status_code=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(http_server_duration_milliseconds_count{job=\"shortn-api\"}[$__rate_interval])), 1)",
           "legendFormat": "5xx ratio"
         }
       ]
@@ -79,12 +80,12 @@
     {
       "type": "timeseries",
       "id": 4,
-      "title": "Latency — p99 by route",
-      "description": "Duration (D of RED). 99th percentile from the otelhttp histogram buckets.",
+      "title": "Latency — p99 by route (ms)",
+      "description": "Duration (D of RED). 99th percentile from the otelhttp histogram buckets, in milliseconds.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": {
-        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 0 } },
+        "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 0 } },
         "overrides": []
       },
       "options": {
@@ -99,7 +100,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_request_duration_seconds_bucket{job=\"shortn-api\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_duration_milliseconds_bucket{job=\"shortn-api\"}[$__rate_interval])))",
           "legendFormat": "{{http_route}}"
         }
       ]
@@ -113,12 +114,12 @@
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 9 },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "ms",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "red", "value": 0.05 }
+              { "color": "red", "value": 50 }
             ]
           }
         },
@@ -133,7 +134,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job=\"shortn-api\",http_route=\"/{code}\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_duration_milliseconds_bucket{job=\"shortn-api\",http_route=\"/{code}\"}[$__rate_interval])))",
           "legendFormat": "redirect p99"
         }
       ]
@@ -170,7 +171,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"shortn-api\",http_route=\"/api/links\",http_response_status_code!~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{job=\"shortn-api\",http_route=\"/api/links\"}[$__rate_interval])), 1)",
+          "expr": "sum(rate(http_server_duration_milliseconds_count{job=\"shortn-api\",http_route=\"/api/links\",http_status_code!~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(http_server_duration_milliseconds_count{job=\"shortn-api\",http_route=\"/api/links\"}[$__rate_interval])), 1)",
           "legendFormat": "create success"
         }
       ]
@@ -340,6 +341,49 @@
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "up{job=~\"shortn-.*\"}",
           "legendFormat": "{{job}} {{instance}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "id": 14,
+      "title": "Analytics consumer",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "id": 15,
+      "title": "Consumer lag by partition",
+      "description": "Records produced to shortn.clicks but not yet consumed (high watermark − last consumed). Hovers near 0 when the consumer keeps up; climbs if it falls behind.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "analytics_consumer_lag{job=\"shortn-analytics\"}",
+          "legendFormat": "partition {{partition}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 16,
+      "title": "Clicks processed rate",
+      "description": "Throughput of click events written to Postgres by the consumer.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(analytics_clicks_processed_total{job=\"shortn-analytics\"}[$__rate_interval]))",
+          "legendFormat": "clicks/s"
         }
       ]
     }

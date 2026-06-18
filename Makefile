@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker migrate-up migrate-down up down ps logs redpanda topics rpk chaos
+.PHONY: help run run-analytics build test test-integration lint docker migrate-up migrate-down up down ps logs redpanda topics rpk chaos load
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -69,3 +69,7 @@ rpk: ## run any rpk command, e.g. make rpk ARGS="cluster info"
 # ------------ resilience ------------
 chaos: ## take each dependency down in turn and assert documented behavior (docs/runbook.md)
 	./scripts/chaos.sh
+
+# ------------ observability ------------
+load: ## drive preview traffic so the Phase 6 dashboards move (k6 via docker; needs the stack up)
+	docker run --rm -i --network shortn_default -e BASE_URL=http://nginx grafana/k6 run - < load/preview.js
