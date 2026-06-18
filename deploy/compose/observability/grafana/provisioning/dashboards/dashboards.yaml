@@ -1,0 +1,18 @@
+# Dashboard provider, auto-loaded on startup (ADR 0010). Grafana watches the
+# mounted folder and loads every *.json dashboard from it — so dashboards ship as
+# reviewable files in git, the same philosophy as migrations and datasources.
+apiVersion: 1
+
+providers:
+  - name: shortn
+    orgId: 1
+    type: file
+    disableDeletion: false
+    # Re-read the folder periodically so editing a committed JSON shows up without
+    # a Grafana restart.
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      # Matches the volume mount in docker-compose.yml; the JSON files live here.
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

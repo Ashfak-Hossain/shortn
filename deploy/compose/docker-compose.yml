@@ -264,6 +264,10 @@ services:
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Dashboard JSON lives separately from the provisioning config and is mounted
+      # where the dashboards provider (dashboards.yaml) points — so dashboards are
+      # reviewable, version-controlled files, not clicked-and-lost UI state.
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3000:3000"
     depends_on:
