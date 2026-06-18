@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
 )
 
 // LinkClicked is emitted every time a short link is resolved. It is the wire
@@ -32,13 +33,16 @@ type KafkaPublisher struct {
 // NewKafkaPublisher returns a KafkaPublisher that produces to topic on the given
 // Kafka/Redpanda brokers. It returns an error if the underlying client cannot be created.
 func NewKafkaPublisher(brokers []string, topic string) (*KafkaPublisher, error) {
+	// kotel opens a "publish" span per record and injects the W3C traceparent into
+	// the record HEADERS — never the JSON payload, which would couple the event
+	// schema to tracing.
+	ko := kotel.NewKotel(kotel.WithTracer(kotel.NewTracer()))
+
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
 		kgo.DefaultProduceTopic(topic),
-		// Bound how long a background publish keeps retrying when Redpanda is
-		// unreachable, so click-publish goroutines drain instead of piling up
-		// during an outage. Analytics is best-effort — a dropped click is fine.
 		kgo.RecordDeliveryTimeout(10*time.Second),
+		kgo.WithHooks(ko.Hooks()...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating kafka client: %w", err)

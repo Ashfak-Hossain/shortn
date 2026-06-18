@@ -16,8 +16,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
 
 	"github.com/Ashfak-Hossain/shortn/internal/config"
 	"github.com/Ashfak-Hossain/shortn/internal/events"
@@ -90,8 +92,17 @@ func main() {
 	// ============================================================
 
 	// Postgres is both the sink and the source of truth for progress, so an
-	// unreachable DB at startup is fatal (unlike the cache in the API).
-	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	// unreachable DB at startup is fatal (unlike the cache in the API). Parse the
+	// DSN first so otelpgx can be attached before the pool is built — the insert and
+	// offset-commit then show as spans inside the per-record processing trace.
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("invalid DATABASE_URL", "err", err)
+		os.Exit(1)
+	}
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		logger.Error("failed to create db pool", "err", err)
 		os.Exit(1)
@@ -139,6 +150,12 @@ func main() {
 		}
 	}
 
+	// kotel's fetch hook extracts the traceparent the API injected into each record's
+	// headers; WithProcessSpan (in the loop) then makes the per-record processing
+	// span a CHILD of the API's publish span — stitching both services into one trace.
+	tracer := kotel.NewTracer()
+	ko := kotel.NewKotel(kotel.WithTracer(tracer))
+
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(strings.Split(cfg.KafkaBrokers, ",")...),
 		kgo.ConsumerGroup(group),
@@ -146,6 +163,7 @@ func main() {
 		kgo.DisableAutoCommit(), // commit offsets to Postgres, never to Kafka
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.OnPartitionsAssigned(onAssigned),
+		kgo.WithHooks(ko.Hooks()...),
 	)
 	if err != nil {
 		logger.Error("failed to create kafka client", "err", err)
@@ -181,7 +199,15 @@ func main() {
 		iter := fetches.RecordIter()
 		for !iter.Done() {
 			rec := iter.Next()
-			if err := process(ctx, pool, st, group, rec); err != nil {
+
+			// kotel's fetch hook already pulled the API's trace context out of the
+			// record headers into rec.Context, so this processing span is a child of
+			// the API's publish span — the insert + offset commit nest inside the same
+			// end-to-end trace.
+			procCtx, span := tracer.WithProcessSpan(rec)
+			err := process(procCtx, pool, st, group, rec)
+			span.End()
+			if err != nil {
 				// Never advance past a record that failed to write, or that click is
 				// lost forever. Exit; on restart the consumer seeks from Postgres and
 				// reprocesses this exact record (the ON CONFLICT makes any partial replay safe).
