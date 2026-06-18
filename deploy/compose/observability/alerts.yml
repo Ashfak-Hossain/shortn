@@ -1,2 +1,59 @@
-# SLO alerting rules
-groups: []
+# SLO alerting rules — referenced from prometheus.yml (rule_files) and evaluated
+# every 15s (evaluation_interval). The SLI/SLO/SLA definitions these enforce live
+# in docs/runbook.md.
+#
+# Latency rules use http_server_duration_milliseconds (MILLISECONDS), NOT the
+# _seconds metric: the pinned otelhttp v0.60 in http/dup mode records ms values
+# into the seconds-named histogram, so the ms metric is the correct one and the
+# thresholds are in ms (50, not 0.05). See the dashboard's note.
+groups:
+  - name: shortn-slo
+    rules:
+      # SLO: 99.9% of redirects served < 50 ms. Symptom alert — p99 over the last
+      # 5 m stays above the 50 ms objective for a sustained 5 m. No traffic →
+      # histogram_quantile is NaN → comparison false → stays inactive.
+      - alert: RedirectLatencySLOBreach
+        expr: histogram_quantile(0.99, sum by (le) (rate(http_server_duration_milliseconds_bucket{job="shortn-api",http_route="/{code}"}[5m]))) > 50
+        for: 5m
+        labels:
+          severity: warning
+          slo: redirect-latency
+        annotations:
+          summary: "Redirect p99 latency above the 50ms SLO"
+          description: "Redirect p99 has been {{ $value | humanize }}ms (> 50ms) for 5m. SLO: 99.9% < 50ms. Open a redirect trace in Tempo to find the slow hop."
+
+      # SLO: 99% of create requests succeed (non-5xx). Alert when the 5xx ratio on
+      # POST /api/links exceeds 1% for 5 m.
+      - alert: CreateErrorSLOBreach
+        expr: sum(rate(http_server_duration_milliseconds_count{job="shortn-api",http_route="/api/links",http_status_code=~"5.."}[5m])) / sum(rate(http_server_duration_milliseconds_count{job="shortn-api",http_route="/api/links"}[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          slo: create-success
+        annotations:
+          summary: "Create 5xx error ratio above the 1% SLO"
+          description: "POST /api/links 5xx ratio has been {{ $value | humanizePercentage }} (> 1%) for 5m. SLO: 99% non-5xx."
+
+  - name: shortn-operational
+    rules:
+      # A scrape target is unreachable — the instance is down or unhealthy. Fires
+      # fast (1 m) because a down service is unambiguous and page-worthy.
+      - alert: TargetDown
+        expr: up{job=~"shortn-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} target {{ $labels.instance }} is down"
+          description: "Prometheus has been unable to scrape {{ $labels.instance }} ({{ $labels.job }}) for 1m."
+
+      # The analytics consumer is falling behind: the backlog of produced-but-
+      # unconsumed clicks is growing on at least one partition.
+      - alert: AnalyticsConsumerLagHigh
+        expr: max by (partition) (analytics_consumer_lag{job="shortn-analytics"}) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Analytics consumer lag high on partition {{ $labels.partition }}"
+          description: "Partition {{ $labels.partition }} lag has been {{ $value }} (> 1000) for 5m. The consumer is not keeping up with click volume."
