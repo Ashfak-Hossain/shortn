@@ -63,7 +63,7 @@ func Setup(ctx context.Context, cfg Config) (*Providers, error) {
 	// shared state and it's testable. The OTel Prometheus exporter is a metric
 	// Reader that publishes into that registry; promhttp serves it at /metrics.
 	reg := prometheus.NewRegistry()
-	metricExp, err := otelprom.New(otelprom.WithRegisterer(reg))
+	metricExp, err := otelprom.New(otelprom.WithRegisterer(reg)) // bridge (OTel -> Prometheus)
 	if err != nil {
 		return nil, fmt.Errorf("creating prometheus metric exporter: %w", err)
 	}
