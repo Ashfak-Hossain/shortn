@@ -1,0 +1,7 @@
+$kind: http-request
+description: "The redirect-latency SLI in PromQL: p99 over the last 5m, in milliseconds. SLO is < 50. Uses the _milliseconds metric (the _seconds one is broken in otelhttp v0.60 — see the units-bug note)."
+url: '{{promUrl}}/api/v1/query?query=histogram_quantile(0.99, sum by (le) (rate(http_server_duration_milliseconds_bucket{job="shortn-api",http_route="/{code}"}[5m])))'
+method: GET
+queryParams:
+  query: histogram_quantile(0.99, sum by (le) (rate(http_server_duration_milliseconds_bucket{job="shortn-api",http_route="/{code}"}[5m])))
+order: 2000

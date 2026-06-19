@@ -1,0 +1,11 @@
+$kind: http-request
+description: A code that was never created → 404.
+url: "{{baseUrl}}/doesnotexist00"
+method: GET
+scripts:
+  - type: afterResponse
+    code: pm.test('404 Not Found', () => pm.response.to.have.status(404));
+    language: text/javascript
+settings:
+  followRedirects: false
+order: 6000

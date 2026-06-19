@@ -1,0 +1,13 @@
+$kind: http-request
+description: "The Prometheus pull endpoint. Plain-text exposition format — every metric the OTel SDK + runtime expose. This is what Prometheus scrapes every 15s. NOTE: through nginx you hit a random one of the 3 api instances."
+url: "{{baseUrl}}/metrics"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('200 OK', () => pm.response.to.have.status(200));
+      pm.test('exposes http_server_duration_milliseconds', () => {
+        pm.expect(pm.response.text()).to.include('http_server_duration_milliseconds');
+      });
+    language: text/javascript
+order: 3000

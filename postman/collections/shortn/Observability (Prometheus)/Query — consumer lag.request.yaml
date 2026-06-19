@@ -1,0 +1,7 @@
+$kind: http-request
+description: Analytics consumer lag per partition — produced-but-not-yet-consumed clicks. Should hover near 0 when the consumer keeps up.
+url: "{{promUrl}}/api/v1/query?query=max by (partition) (analytics_consumer_lag)"
+method: GET
+queryParams:
+  query: max by (partition) (analytics_consumer_lag)
+order: 4000

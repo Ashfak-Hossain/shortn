@@ -1,0 +1,22 @@
+$kind: http-request
+description: Send TWICE with the same Idempotency-Key header → identical code, no duplicate. Proves the Phase 5 idempotency store.
+url: "{{baseUrl}}/api/links"
+method: POST
+headers:
+  Content-Type: application/json
+  Idempotency-Key: demo-key-12345
+body:
+  type: text
+  content: |-
+    {
+      "url": "https://example.com/idempotent"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      // Send this request twice with the SAME Idempotency-Key: you get the
+      // SAME code both times — no duplicate link. That is the Phase 5 dedupe.
+      console.log('code =', pm.response.json().code);
+    language: text/javascript
+order: 2000
