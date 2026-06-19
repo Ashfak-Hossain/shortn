@@ -1,0 +1,41 @@
+// Grafana Alloy — the log shipper
+// The app writes JSON to stdout and knows nothing about Loki. Alloy
+// discovers the running compose containers via the Docker socket, tails their
+// stdout, and pushes to Loki. This keeps the app a 12-factor citizen.
+
+// Discover all running containers on the local Docker daemon.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Turn Docker metadata into useful Loki labels. Keep these LOW cardinality:
+// the compose service name and container name, nothing per-request.
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+// Tail each discovered container's logs and forward to the Loki writer.
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  labels     = { job = "docker" }
+  forward_to = [loki.write.default.receiver]
+}
+
+// Push to Loki's HTTP ingest endpoint over the compose network.
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

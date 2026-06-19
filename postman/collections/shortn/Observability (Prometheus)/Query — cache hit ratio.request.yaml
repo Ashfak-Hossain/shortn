@@ -1,0 +1,7 @@
+$kind: http-request
+description: "Cache hit ratio: hits / (hits+misses), computed in PromQL from the counter pair — you never store a ratio (you can't average ratios)."
+url: '{{promUrl}}/api/v1/query?query=sum(rate(cache_requests_total{result="hit"}[5m])) / sum(rate(cache_requests_total[5m]))'
+method: GET
+queryParams:
+  query: sum(rate(cache_requests_total{result="hit"}[5m])) / sum(rate(cache_requests_total[5m]))
+order: 3000

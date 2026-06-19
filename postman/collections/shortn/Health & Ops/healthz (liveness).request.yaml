@@ -1,0 +1,11 @@
+$kind: http-request
+description: Liveness probe — dependency-free, always fast. 'Am I alive? Restart me if not.'
+url: "{{baseUrl}}/healthz"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('200 OK', () => pm.response.to.have.status(200));
+      // Liveness: NO dependency checks. Stays 200 even if Postgres is down.
+    language: text/javascript
+order: 1000

@@ -91,3 +91,56 @@ cached code with Postgres stopped), so the database is shielded from the read-he
 path and from hot-key stampedes (collapsed via `singleflight`). Cache failures **fail open** —
 a Redis outage degrades latency, never correctness. Realistic load numbers, where the DB
 carries network latency and contention, come with the k6 suite in Phase 8.
+
+## Observability
+
+Every service emits the **three pillars** of telemetry, instrumented once against the
+**OpenTelemetry** Go SDK and exported **directly** to the backends — no OpenTelemetry
+Collector in the middle (justified for two services in [ADR 0010](docs/architecture/0010-observability.md)):
+
+| Pillar      | Answers                              | Tool           | How it's wired                                                                                                           |
+| ----------- | ------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **Metrics** | _Is it healthy? Alert me._           | **Prometheus** | App exposes `/metrics`; Prometheus **pulls** (scrapes) every instance every 15s.                                         |
+| **Logs**    | _What happened to this one request?_ | **Loki**       | App keeps writing JSON to stdout; **Grafana Alloy** tails containers and ships to Loki. The app never learns about Loki. |
+| **Traces**  | _Why was this slow?_                 | **Tempo**      | App **pushes** spans over OTLP straight to Tempo.                                                                        |
+
+**Grafana** (http://localhost:3000) is the single pane: it queries all three datasources and
+auto-loads the provisioned **golden-signals dashboard** (Rate / Errors / Duration for the
+redirect & create paths, plus cache-hit ratio, consumer lag, and saturation).
+
+### The end-to-end trace
+
+The showpiece: **one click produces one trace that spans both services.** The W3C
+`traceparent` rides in the HTTP request, then is injected into the **Kafka record headers**
+by the producer and extracted by the consumer — so the span tree runs edge → API handler →
+Redis/Postgres → Kafka publish → **analytics consumer** → the click `INSERT` + offset commit,
+all stitched into a single trace even though a queue breaks the in-process call stack.
+
+![End-to-end trace spanning shortn-api and shortn-analytics across Kafka](docs/images/trace-end-to-end.png)
+
+> _Open Grafana → Explore → Tempo, run a search, and pick a redirect trace; it carries spans
+> from both `shortn-api` and `shortn-analytics`, with the queue wait visible as the gap._
+
+### SLOs & alerting
+
+Two SLOs drive the Prometheus alert rules ([alerts.yml](deploy/compose/observability/alerts.yml)),
+documented in the [runbook](docs/runbook.md#slis-slos--alerting):
+
+| SLI                                | SLO           | Alert                      |
+| ---------------------------------- | ------------- | -------------------------- |
+| Redirect latency (`/{code}`)       | 99.9% < 50 ms | `RedirectLatencySLOBreach` |
+| Create success (`POST /api/links`) | 99% non-5xx   | `CreateErrorSLOBreach`     |
+
+Plus operational alerts: `TargetDown` (a scrape target unreachable) and
+`AnalyticsConsumerLagHigh` (the consumer falling behind).
+
+### Try it
+
+```sh
+make up                                   # whole stack incl. Prometheus/Grafana/Loki/Tempo/Alloy
+open http://localhost:3000                # Grafana — the shortn-overview dashboard
+open http://localhost:9090/targets        # Prometheus — every scrape target up?
+make load                                 # k6 traffic to make the dashboards move
+```
+
+API and observability checks are also a **Postman collection** — see [docs/postman/](docs/postman/).

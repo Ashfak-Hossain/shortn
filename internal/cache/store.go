@@ -9,6 +9,9 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // tombstone marks a code as known-absent in the cache. A real cached value is
@@ -20,15 +23,19 @@ const tombstone = "\x00notfound"
 // visible soon, and so a scanner can't pin many negative entries in memory.
 const negativeTTL = 30 * time.Second
 
+// meterName scopes this package's metrics in the OTel meter registry.
+const meterName = "github.com/Ashfak-Hossain/shortn/internal/cache"
+
 // CachingStore decorates a shortener.LinkStore with a read-through Redis cache.
 // It is itself a shortener.LinkStore, so the domain service cannot tell whether
 // it was handed the raw Postgres store or this cache-wrapped one.
 type CachingStore struct {
-	next  shortener.LinkStore // the wrapped store (Postgres) — the source of truth
-	cache *Client             // redis client
-	ttl   time.Duration       // expiry for cache entries (real links)
-	log   *slog.Logger        // non-fatal cache failures only
-	group singleflight.Group  // collapses concurrent misses for the same code into one DB load
+	next     shortener.LinkStore // the wrapped store (Postgres) — the source of truth
+	cache    *Client             // redis client
+	ttl      time.Duration       // expiry for cache entries (real links)
+	log      *slog.Logger        // non-fatal cache failures only
+	group    singleflight.Group  // collapses concurrent misses for the same code into one DB load
+	requests metric.Int64Counter // cache_requests_total{result="hit|miss"}
 }
 
 // Compile-time assertion that *CachingStore satisfies LinkStore.
@@ -36,7 +43,21 @@ var _ shortener.LinkStore = (*CachingStore)(nil)
 
 // NewCachingStore wraps next with a Redis read-through cache.
 func NewCachingStore(next shortener.LinkStore, cache *Client, ttl time.Duration, log *slog.Logger) *CachingStore {
-	return &CachingStore{next: next, cache: cache, ttl: ttl, log: log}
+	// An OTel counter, not a raw Prometheus one: the Prometheus registry lives in
+	// internal/observability, and the global MeterProvider bridges this to it,
+	// surfacing at /metrics as cache_requests_total{result="..."}. We keep hit and
+	// miss as a counter PAIR and divide in PromQL — a ratio can't be averaged, so
+	// it has to be computed at query time, never stored.
+	requests, err := otel.Meter(meterName).Int64Counter(
+		"cache.requests",
+		metric.WithDescription("Cache lookups by outcome (hit or miss)."),
+	)
+	if err != nil {
+		// Int64Counter hands back a usable no-op even on error, so this only logs to
+		// flag a bad instrument name rather than nil-guarding every call site.
+		log.Warn("failed to create cache.requests counter", "err", err)
+	}
+	return &CachingStore{next: next, cache: cache, ttl: ttl, log: log, requests: requests}
 }
 
 // Create implements [shortener.LinkStore].
@@ -63,14 +84,15 @@ func (s *CachingStore) GetByCode(ctx context.Context, code string) (*shortener.L
 	if val, found, err := s.cache.Get(ctx, key(code)); err != nil {
 		s.log.Warn("cache get failed; serving from store", "code", code, "err", err)
 	} else if found {
+		s.requests.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "hit")))
 		return fromCached(code, val)
 	}
+	// A clean miss or a Redis error that forced a fallback both mean the cache
+	// didn't answer — both count as a miss.
+	s.requests.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "miss")))
 
-	// Miss (or Redis down): collapse all concurrent misses for THIS code into one
-	// store load. The first goroutine ("leader") runs the func; the rest block and
-	// share its result. group. Do keys on the code, so different codes don't block.
 	v, err, _ := s.group.Do(code, func() (any, error) {
-		return s.loadAndCache(ctx, code) // load from db and populate cache;
+		return s.loadAndCache(ctx, code) // load from db and populate cache
 	})
 	if err != nil {
 		return nil, err

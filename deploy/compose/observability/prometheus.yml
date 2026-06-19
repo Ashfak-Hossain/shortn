@@ -1,0 +1,31 @@
+# Prometheus scrape + rule config for the shortn local stack.
+# Targets are reached over the compose network by service name, so no host port
+# mapping is needed for scraping.
+
+global:
+  scrape_interval: 15s # By default, scrape targets every 15 seconds.
+  evaluation_interval: 15s
+
+# SLO alerting rules live in a separate file
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# A scrape configuration containing exactly one endpoint to scrape
+scrape_configs:
+  # Prometheus scrapes itself — a free liveness signal for the monitor.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # The three API replicas behind nginx. Each exposes "/metrics" once the OTel
+  # bootstrap ships
+  - job_name: shortn-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api-1:8080', 'api-2:8080', 'api-3:8080']
+
+  # The analytics consumer gains a small HTTP server for "/metrics"
+  - job_name: shortn-analytics
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['analytics:8080']

@@ -1,7 +1,7 @@
 // Package main is the primary HTTP service entrypoint for the shortn application.
-// It is responsible for wiring application configuration, structured logging,
-// the database connection pool, domain services, the HTTP router, and managing
-// the HTTP server lifecycle, including graceful shutdowns.
+// It wires configuration, structured logging, the database pool, the Redis cache,
+// domain services, and the HTTP router, then runs the server through to a graceful
+// shutdown.
 package main
 
 import (
@@ -26,10 +26,13 @@ import (
 	httpapi "github.com/Ashfak-Hossain/shortn/internal/http"
 	"github.com/Ashfak-Hossain/shortn/internal/idempotency"
 	"github.com/Ashfak-Hossain/shortn/internal/idgen"
+	"github.com/Ashfak-Hossain/shortn/internal/observability"
 	"github.com/Ashfak-Hossain/shortn/internal/ratelimit"
 	"github.com/Ashfak-Hossain/shortn/internal/resilience"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/Ashfak-Hossain/shortn/internal/store"
+	"github.com/exaring/otelpgx"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 )
 
 // cacheTTL is how long a resolved link stays in Redis before it self-expires.
@@ -49,7 +52,11 @@ const requestTimeout = 2 * time.Second
 const idempotencyTTL = 24 * time.Hour
 
 func main() {
-	// Failing fast here prevents the application from booting in an invalid state.
+	// ============================================================
+	// CONFIGURATION & ID GENERATOR
+	// ============================================================
+
+	// Fail fast: a bad config or worker ID must never boot into a running state.
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
@@ -69,24 +76,64 @@ func main() {
 		slog.Error("failed to initialise sqids encoder", "err", err)
 		os.Exit(1)
 	}
-	gen, err := idgen.NewSnowflakeGenerator(uint16(wid), sq)
 
+	gen, err := idgen.NewSnowflakeGenerator(uint16(wid), sq)
 	if err != nil {
 		slog.Error("failed to create ID generator", "err", err)
 		os.Exit(1)
 	}
 
-	// JSON format ensures machine-readable output in prod.
-	// We set this as the default logger so standard library logs capture the same format.
+	// ============================================================
+	// LOGGING
+	// ============================================================
+
+	// JSON output is machine-readable for prod log shipping. Registering it as the
+	// default logger means stdlib log calls share the same format.
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: parseLevel(cfg.LogLevel),
 	}))
 	slog.SetDefault(logger)
 
-	// pgxpool.New establishes the configuration but connects lazily.
-	// We mandate an immediate Ping to ensure the database is reachable on startup,
-	// preventing the application from accepting traffic when the DB is down.
-	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	// ============================================================
+	// OBSERVABILITY (OpenTelemetry)
+	// ============================================================
+
+	// Set up OTel early so every component below can emit signals. The metric
+	// reader is local (no network); the trace exporter connects lazily, so an
+	// unreachable Tempo never blocks startup.
+	providers, err := observability.Setup(context.Background(), observability.Config{
+		ServiceName:  "shortn-api",
+		InstanceID:   cfg.InstanceID,
+		OTLPEndpoint: cfg.OTELEndpoint,
+	})
+	if err != nil {
+		logger.Error("failed to init observability", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := providers.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("observability shutdown failed", "err", err)
+		}
+	}()
+
+	// ============================================================
+	// DATABASE (Postgres)
+	// ============================================================
+
+	// pgxpool connects lazily, so Ping immediately: Postgres is a hard dependency,
+	// and the service must refuse traffic when it is unreachable at startup.
+	// Parse the DSN into a config so the OTel tracer can be attached before the
+	// pool is built.
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("invalid DATABASE_URL", "err", err)
+		os.Exit(1)
+	}
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		logger.Error("failed to create db pool", "err", err)
 		os.Exit(1)
@@ -100,50 +147,75 @@ func main() {
 		os.Exit(1)
 	}
 
-	// redis.ParseURL turns the DSN into options (pool size, db index, etc.); go-redis connects lazily on first use.
+	// ============================================================
+	// CACHE (Redis)
+	// ============================================================
+
+	// ParseURL turns the DSN into options (pool size, db index, …); go-redis
+	// connects lazily on first use.
 	opts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
 		logger.Error("invalid REDIS_URL", "err", err)
 		os.Exit(1)
 	}
-	// go-redis defaults to a 3s ReadTimeout.These short, explicit timeouts make a hung Redis
-	// fail fast so callers fail open (serve from Postgres, skip the rate limit) well
-	// within the request budget. Local Redis answers in well under a millisecond, so
-	// this is huge headroom for normal operation.
+	// Short, explicit timeouts (go-redis defaults to a 3s read) make a hung Redis
+	// fail fast so callers fail open — serve from Postgres, skip the rate limit —
+	// well within the request budget. Local Redis answers in well under a
+	// millisecond, so this is huge headroom for normal operation.
 	opts.DialTimeout = 300 * time.Millisecond
 	opts.ReadTimeout = 200 * time.Millisecond
 	opts.WriteTimeout = 200 * time.Millisecond
 	opts.PoolTimeout = 300 * time.Millisecond
 	rdb := redis.NewClient(opts)
+	// One hook opens a child span per Redis command, so cache GET/SET (and the
+	// rate-limit checks that share this client) appear in the trace. Tracing isn't
+	// load-bearing, so a setup failure is a warning, not a fatal — same fail-open
+	// stance as Redis itself.
+	if err := redisotel.InstrumentTracing(rdb); err != nil {
+		logger.Warn("failed to instrument redis tracing", "err", err)
+	}
 	defer func() {
 		if err := rdb.Close(); err != nil {
 			logger.Warn("failed to close redis client", "err", err)
 		}
 	}()
 
-	// Unlike Postgres, a Redis outage is NOT fatal — the cache is an optimization,
-	// not a dependency. We ping only to surface a warning; we keep booting either way.
-	// This is the "fail open" principle enforced at startup.
+	// A Redis outage is NOT fatal — the cache is an optimization, not a dependency.
+	// Ping only surfaces a warning; startup continues either way ("fail open").
 	redisPingCtx, cancelRedisPing := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelRedisPing()
 	if err := rdb.Ping(redisPingCtx).Err(); err != nil {
 		logger.Warn("redis not reachable at startup; serving uncached from postgres", "err", err)
 	}
 
+	// ============================================================
+	// DOMAIN SERVICE WIRING
+	// ============================================================
+
+	// Compose the store from the inside out: raw pgx store → circuit breaker →
+	// Redis cache. The service receives the cache-wrapped store, never the raw one.
 	st := store.New(pool)
 	resilient := resilience.NewResilientStore(st, logger)
 	cachingStore := cache.NewCachingStore(resilient, cache.New(rdb), cacheTTL, logger)
-	svc := shortener.NewService(cachingStore, gen) // service gets the cache-wrapped store, not the raw one
+	svc := shortener.NewService(cachingStore, gen)
 
-	// Like the pgx pool and redis client, the franz-go client connects lazily, so this
-	// only errors on bad config — a broker that is *down* surfaces later at Publish time
-	// (logged, non-fatal), never here.
+	// ============================================================
+	// EVENT PUBLISHER (Kafka / Redpanda)
+	// ============================================================
+
+	// Like the pgx pool and redis client, the franz-go client connects lazily, so
+	// this only errors on bad config — a broker that is down surfaces later at
+	// Publish time (logged, non-fatal), never here.
 	pub, err := events.NewKafkaPublisher(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic)
 	if err != nil {
 		logger.Error("failed to create kafka publisher", "err", err)
 		os.Exit(1)
 	}
 	defer pub.Close()
+
+	// ============================================================
+	// RATE LIMITER & IDEMPOTENCY
+	// ============================================================
 
 	burst, err := strconv.Atoi(cfg.RateLimitBurst)
 	if err != nil || burst < 1 {
@@ -159,6 +231,10 @@ func main() {
 
 	idem := idempotency.New(rdb, idempotencyTTL)
 
+	// ============================================================
+	// HTTP ROUTER & SERVER
+	// ============================================================
+
 	router := httpapi.NewRouter(httpapi.RouterDeps{
 		Service:        svc,
 		Pinger:         pool,
@@ -168,10 +244,11 @@ func main() {
 		Limiter:        limiter,
 		Idempotency:    idem,
 		Publisher:      pub,
+		MetricsHandler: providers.MetricsHandler,
 	})
 
-	// We enforce strict HTTP server timeouts to mitigate slowloris attacks
-	// and prevent resource exhaustion from stale or malicious client connections.
+	// Strict server timeouts mitigate slowloris attacks and stop stale or malicious
+	// connections from exhausting resources.
 	addr := ":" + cfg.Port
 	srv := &http.Server{
 		Addr:         addr,
@@ -181,7 +258,11 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// A separate goroutine leaves the main thread free to block on OS signals below.
+	// ============================================================
+	// STARTUP & GRACEFUL SHUTDOWN
+	// ============================================================
+
+	// Serve in a separate goroutine so the main thread is free to block on signals.
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server failed", "err", err)
@@ -196,7 +277,7 @@ func main() {
 	<-sig
 	logger.Info("shutdown signal received, draining connections")
 
-	// Allow in-flight requests a maximum of 10 seconds to complete before forcefully terminating.
+	// Give in-flight requests up to 10s to finish before forcing termination.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {

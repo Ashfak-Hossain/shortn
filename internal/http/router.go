@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/Ashfak-Hossain/shortn/internal/events"
 	"github.com/Ashfak-Hossain/shortn/internal/ratelimit"
@@ -45,6 +46,7 @@ type RouterDeps struct {
 	Limiter        *ratelimit.Limiter
 	Idempotency    IdempotencyStore
 	Publisher      Publisher
+	MetricsHandler http.Handler // promhttp handler; mounted at GET /metrics
 }
 
 // NewRouter returns a fully configured [http.Handler] with all application routes registered.
@@ -57,10 +59,14 @@ func NewRouter(d RouterDeps) http.Handler {
 
 	router.Use(ServedByMiddleware(d.InstanceID))
 	router.Use(TimeoutMiddleware(d.RequestTimeout))
+	router.Use(RouteTagMiddleware) // bounded route template → span name + metric label
 
 	// Op endpoints
 	router.Get("/healthz", healthz)
 	router.Get("/readyz", h.readyz)
+
+	// prometheus scrapes this.
+	router.Method(http.MethodGet, "/metrics", d.MetricsHandler)
 
 	// client-facing sits behind the rate limiter
 	router.Group(func(r chi.Router) {
@@ -74,7 +80,14 @@ func NewRouter(d RouterDeps) http.Handler {
 		r.Get("/api/links/{code}/stats", h.stats)
 	})
 
-	return router
+	// otelhttp is the OUTERMOST layer: it reads the inbound W3C traceparent, starts
+	// the server span, and records the http.server.* metrics. It must wrap the whole
+	// chain so the span covers middleware time and trace context exists before
+	// anything below runs. The operation name is a fallback — RouteTagMiddleware
+	// overrides it per route once chi has matched.
+	return otelhttp.NewHandler(router, "http.server",
+		otelhttp.WithFilter(traceableRoute),
+	)
 }
 
 // healthz implements a standard Kubernetes liveness probe.

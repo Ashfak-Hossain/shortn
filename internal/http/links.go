@@ -160,8 +160,13 @@ func (h *handler) redirect(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		Version:   1,
 	}
+	// Detach from the request's cancellation but KEEP its trace context, so the
+	// publish span joins THIS redirect's trace even though it runs after the handler
+	// returns. context.Background() would orphan the publish into a separate trace;
+	// r.Context() would be cancelled the instant we return.
+	pubCtx := context.WithoutCancel(r.Context())
 	go func() {
-		if err := h.publisher.Publish(context.Background(), event); err != nil {
+		if err := h.publisher.Publish(pubCtx, event); err != nil {
 			h.logger.Error("publish click event failed", "err", err, "code", code)
 		}
 	}()

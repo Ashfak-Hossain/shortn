@@ -1,0 +1,15 @@
+$kind: http-request
+description: "Click stats for a code: {code, total, series[]}. Counts come from the analytics consumer writing click rows to Postgres, so hit 'Redirect' a few times first."
+url: "{{baseUrl}}/api/links/{{lastCode}}/stats"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('200 OK', () => pm.response.to.have.status(200));
+      pm.test('has total + series', () => {
+        const b = pm.response.json();
+        pm.expect(b).to.have.property('total');
+        pm.expect(b).to.have.property('series');
+      });
+    language: text/javascript
+order: 4000

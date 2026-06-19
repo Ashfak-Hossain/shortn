@@ -1,0 +1,27 @@
+$kind: http-request
+name: Create link
+description: Create a short link. Returns 201 with {code, short_url, long_url}. The test script stores `code` into the `lastCode` variable.
+url: "{{baseUrl}}/api/links"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "url": "https://example.com/observability-tour"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201 Created', () => pm.response.to.have.status(201));
+      const body = pm.response.json();
+      pm.test('has code + short_url', () => {
+        pm.expect(body).to.have.property('code');
+        pm.expect(body).to.have.property('short_url');
+      });
+      // Save the new code so Redirect / Stats below can reuse it.
+      pm.collectionVariables.set('lastCode', body.code);
+      console.log('saved lastCode =', body.code);
+    language: text/javascript
+order: 1000

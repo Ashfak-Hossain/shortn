@@ -1,5 +1,28 @@
 $kind: collection
-description: URL shortener API — Phase 3. Import one of the environment files alongside this collection to switch between nginx (port 80) and direct (port 8080).
+name: shortn
+description: |-
+  shortn URL shortener — every endpoint plus the observability checks.
+
+  How to use:
+
+  1. `make up` to start the stack (edge = nginx on [http://localhost](http://localhost)).
+      
+  2. Run **API ▸ Create link** first — its test script saves the new code into the `lastCode` collection variable, so **Redirect** and **Stats** below it just work.
+      
+  3. IMPORTANT for **Redirect**: turn OFF auto-follow so you see the real 302. Postman Settings ▸ General ▸ 'Automatically follow redirects' = OFF (or the per-request Settings tab). Otherwise Postman chases the 302 to example.com and you see a 200 from there instead.
+      
+
+  Variables (Collection ▸ Variables tab):
+
+  - baseUrl = [http://localhost](http://localhost) (nginx edge — the real entrypoint)
+      
+  - promUrl = [http://localhost:9090](http://localhost:9090) (Prometheus UI/API)
+      
+  - grafanaUrl = [http://localhost:3000](http://localhost:3000)
+      
+  - lastCode = (auto-filled by Create link)
 variables:
-  base_url: http://localhost
-  code: ""
+  baseUrl: http://localhost
+  promUrl: http://localhost:9090
+  grafanaUrl: http://localhost:3000
+  lastCode: ""

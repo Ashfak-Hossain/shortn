@@ -1,0 +1,12 @@
+$kind: http-request
+description: The 4 SLO/operational alert rules and their current state (inactive / pending / firing). Stop the analytics container to watch TargetDown go firing.
+url: "{{promUrl}}/api/v1/rules"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('200 OK', () => pm.response.to.have.status(200));
+      const groups = pm.response.json().data.groups;
+      groups.flatMap(g => g.rules).forEach(r => console.log(r.name, '=>', r.state));
+    language: text/javascript
+order: 5000
