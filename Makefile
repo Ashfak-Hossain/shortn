@@ -1,12 +1,15 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-deploy k8s-migrate k8s-up k8s-down k8s-status k8s-logs
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller k8s-deploy k8s-migrate k8s-up k8s-down k8s-status k8s-logs
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
 
 # kind cluster name + the local image tags loaded into it (override on the CLI if needed)
 KIND_CLUSTER ?= shortn
+KIND_CONFIG ?= deploy/k8s/kind-config.yaml
 API_IMAGE ?= shortn-api:dev
 ANALYTICS_IMAGE ?= shortn-analytics:dev
+# pin to a tag (e.g. controller-v1.12.1) for reproducibility; main always resolves
+INGRESS_NGINX_REF ?= main
 
 help: ## list available targets (this menu)
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -86,7 +89,7 @@ load: ## drive preview traffic so the Phase 6 dashboards move (k6 via docker; ne
 
 # ------------ kubernetes (kind) ------------
 kind-up: ## create the local kind cluster (no-op if it already exists)
-	kind get clusters | grep -qx $(KIND_CLUSTER) || kind create cluster --name $(KIND_CLUSTER)
+	kind get clusters | grep -qx $(KIND_CLUSTER) || kind create cluster --name $(KIND_CLUSTER) --config $(KIND_CONFIG)
 
 kind-down: ## delete the kind cluster (wipes the whole cluster)
 	kind delete cluster --name $(KIND_CLUSTER)
@@ -94,19 +97,24 @@ kind-down: ## delete the kind cluster (wipes the whole cluster)
 kind-load: ## copy the built api+analytics images into the cluster's image store
 	kind load docker-image $(API_IMAGE) $(ANALYTICS_IMAGE) --name $(KIND_CLUSTER)
 
-k8s-deploy: ## apply the service manifests (deps first, then api + analytics)
-	kubectl apply -f deploy/k8s/postgres/ -f deploy/k8s/redis/ -f deploy/k8s/redpanda/ -f deploy/k8s/api/ -f deploy/k8s/analytics/
+k8s-ingress-controller: ## install the nginx ingress controller (kind provider) + wait until ready
+	kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/$(INGRESS_NGINX_REF)/deploy/static/provider/kind/deploy.yaml
+	kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
+
+k8s-deploy: ## apply the service manifests (deps first, then api + analytics + ingress)
+	kubectl apply -f deploy/k8s/postgres/ -f deploy/k8s/redis/ -f deploy/k8s/redpanda/ -f deploy/k8s/api/ -f deploy/k8s/analytics/ -f deploy/k8s/ingress.yaml
 
 k8s-migrate: ## (re)build the migrations ConfigMap from migrations/ and run the migrate Job
+	kubectl rollout status statefulset/shortn-postgres --timeout=120s
 	kubectl create configmap shortn-migrations --from-file=migrations/ --dry-run=client -o yaml | kubectl apply -f -
 	kubectl delete job shortn-migrate --ignore-not-found
 	kubectl apply -f deploy/k8s/migrate-job.yaml
 
-k8s-up: kind-up images kind-load k8s-deploy k8s-migrate ## one button: cluster + images + manifests + migrations
+k8s-up: kind-up k8s-ingress-controller images kind-load k8s-deploy k8s-migrate ## one button: cluster + ingress + images + manifests + migrations
 	@echo "shortn is coming up — watch the pods settle with: make k8s-status"
 
 k8s-down: ## delete shortn workloads (keeps the cluster and its data PVCs)
-	kubectl delete -f deploy/k8s/postgres/ -f deploy/k8s/redis/ -f deploy/k8s/redpanda/ -f deploy/k8s/api/ -f deploy/k8s/analytics/ --ignore-not-found
+	kubectl delete -f deploy/k8s/postgres/ -f deploy/k8s/redis/ -f deploy/k8s/redpanda/ -f deploy/k8s/api/ -f deploy/k8s/analytics/ -f deploy/k8s/ingress.yaml --ignore-not-found
 
 k8s-status: ## pods, services, statefulsets, jobs at a glance
 	kubectl get pods,svc,statefulset,job

@@ -1,0 +1,20 @@
+# deploy/k8s/ingress.yaml — front-door rules: a hostname -> the API Service
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shortn
+  labels:
+    app: shortn-api
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shortn.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shortn-api
+                port:
+                  number: 8080

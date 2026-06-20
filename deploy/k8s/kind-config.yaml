@@ -1,0 +1,21 @@
+# deploy/k8s/kind-config.yaml — how kind should build the shortn cluster
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    # label this node so the nginx ingress controller (which has nodeSelector
+    # ingress-ready=true) will agree to schedule onto it
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    # bridge the Mac's :80/:443 into the node so a browser can reach the ingress
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
