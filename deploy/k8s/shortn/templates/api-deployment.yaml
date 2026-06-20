@@ -5,42 +5,37 @@ metadata:
   labels:
     app: shortn-api
 spec:
-  replicas: 1
+  replicas: {{ .Values.api.replicas }}
   selector:
     matchLabels:
-      app: shortn-api # which pods this Deployment owns
-  template: # blueprint of each pod
+      app: shortn-api
+  template:
     metadata:
       labels:
-        app: shortn-api # add tag in each pod
+        app: shortn-api
     spec:
       containers:
         - name: api
-          image: shortn-api:dev # comopse image
-          imagePullPolicy: IfNotPresent
+          image: '{{ .Values.image.registry }}shortn-api:{{ .Values.image.tag }}'
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: 8080
-          envFrom: # pull ALL keys from both into env
+          envFrom:
             - configMapRef:
                 name: shortn-api-config
             - secretRef:
                 name: shortn-api-secret
-          livenessProbe: # "alive?" → /healthz (dependency-free). Fail ⇒ restart
+          livenessProbe:
             httpGet:
               path: /healthz
               port: 8080
             initialDelaySeconds: 3
             periodSeconds: 10
-          readinessProbe: # pre traffic rotation "/readyz"
+          readinessProbe:
             httpGet:
               path: /readyz
               port: 8080
             initialDelaySeconds: 3
             periodSeconds: 5
           resources:
-            requests: # guaranteed floor — also the HPA's denominator
-              cpu: 50m
-              memory: 64Mi
-            limits: # ceiling — over memory ⇒ OOM-killed
-              cpu: 250m
-              memory: 128Mi
+            {{- toYaml .Values.api.resources | nindent 12 }}

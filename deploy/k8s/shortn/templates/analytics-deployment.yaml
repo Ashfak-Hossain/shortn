@@ -5,7 +5,7 @@ metadata:
   labels:
     app: shortn-analytics
 spec:
-  replicas: 1 # 1 topic partition → 1 active consumer; extra replicas would sit idle
+  replicas: {{ .Values.analytics.replicas }} # 1 topic partition → 1 active consumer; extra replicas would sit idle
   selector:
     matchLabels:
       app: shortn-analytics
@@ -16,8 +16,8 @@ spec:
     spec:
       containers:
         - name: analytics
-          image: shortn-analytics:dev
-          imagePullPolicy: IfNotPresent
+          image: "{{ .Values.image.registry }}shortn-analytics:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: 8080 # /metrics only
           envFrom: # reuse the API's config + secret (DATABASE_URL, KAFKA_BROKERS, …)
@@ -32,9 +32,4 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 128Mi
+            {{- toYaml .Values.analytics.resources | nindent 12 }}

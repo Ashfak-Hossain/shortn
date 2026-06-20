@@ -5,7 +5,7 @@ metadata:
   labels:
     app: shortn-api
 spec:
-  type: ClusterIP # internal-only; we add external Ingress in 7.3
+  type: ClusterIP # internal-only; external traffic enters via the Ingress
   selector:
     app: shortn-api # routes to pods with this label
   ports:

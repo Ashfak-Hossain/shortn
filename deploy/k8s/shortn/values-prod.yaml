@@ -1,0 +1,18 @@
+# Prod overrides — shows how ONE chart serves a second environment with no copy-paste.
+image:
+  registry: ghcr.io/ashfak-hossain/ # pull from GHCR instead of local
+  tag: latest # CI replaces this with the git SHA
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 3 # scale out the stateless API
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+ingress:
+  host: shortn.example.com
