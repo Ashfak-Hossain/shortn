@@ -5,7 +5,9 @@ metadata:
   labels:
     app: shortn-api
 spec:
-  replicas: {{ .Values.api.replicas }}
+  {{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicas }} # the HPA owns replicas when autoscaling is on
+  {{- end }}
   selector:
     matchLabels:
       app: shortn-api

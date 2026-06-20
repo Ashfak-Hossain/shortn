@@ -9,7 +9,12 @@ image:
   pullPolicy: IfNotPresent
 
 api:
-  replicas: 1
+  replicas: 1 # used only when autoscaling is disabled
+  autoscaling:
+    enabled: false # dev turns this on; prod uses fixed replicas
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 50
   resources:
     requests: # guaranteed floor
       cpu: 50m

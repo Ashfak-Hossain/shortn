@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller metrics-server helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -103,6 +103,12 @@ k8s-ingress-controller: ## install the nginx ingress controller (kind provider) 
 	kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/$(INGRESS_NGINX_REF)/deploy/static/provider/kind/deploy.yaml
 	kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
 
+metrics-server: ## install metrics-server (the HPA's CPU source); patch --kubelet-insecure-tls for kind
+	kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+	kubectl patch deployment metrics-server -n kube-system --type=json \
+		-p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+	kubectl rollout status deployment/metrics-server -n kube-system --timeout=120s
+
 helm-install: ## install/upgrade the shortn chart with dev values (idempotent)
 	helm upgrade --install $(HELM_RELEASE) $(CHART) -f $(CHART)/values-dev.yaml
 
@@ -115,7 +121,7 @@ k8s-migrate: ## (re)build the migrations ConfigMap from migrations/ and run the 
 	kubectl delete job shortn-migrate --ignore-not-found
 	kubectl apply -f deploy/k8s/migrate-job.yaml
 
-k8s-up: kind-up k8s-ingress-controller images kind-load helm-install k8s-migrate ## one button: cluster + ingress + images + chart + migrations
+k8s-up: kind-up k8s-ingress-controller metrics-server images kind-load helm-install k8s-migrate ## one button: cluster + ingress + metrics + images + chart + migrations
 	@echo "shortn is coming up — watch the pods settle with: make k8s-status"
 
 k8s-status: ## pods, services, statefulsets, jobs at a glance
@@ -123,3 +129,9 @@ k8s-status: ## pods, services, statefulsets, jobs at a glance
 
 k8s-logs: ## tail one service, e.g. make k8s-logs APP=shortn-api (or shortn-analytics)
 	kubectl logs -f deploy/$(APP)
+
+k8s-load: ## drive CPU load from an in-cluster pod to trigger the HPA (stop with k8s-load-stop)
+	kubectl run loadgen --image=busybox:1.28 --restart=Never -- /bin/sh -c 'for i in $$(seq 1 40); do (while true; do wget -q -O- http://shortn-api:8080/healthz; done) & done; wait'
+
+k8s-load-stop: ## stop and remove the load generator pod
+	kubectl delete pod loadgen --ignore-not-found
