@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shortn-postgres
+  labels:
+    app: shortn-postgres
+spec:
+  clusterIP: None # "headless" — DNS resolves straight to the pod IP
+  selector:
+    app: shortn-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

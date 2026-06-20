@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shortn-api
+  labels:
+    app: shortn-api
+spec:
+  type: ClusterIP # internal-only; we add external Ingress in 7.3
+  selector:
+    app: shortn-api # routes to pods with this label
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
