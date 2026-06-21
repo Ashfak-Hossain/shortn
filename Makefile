@@ -142,7 +142,7 @@ k8s-migrate: ## (re)build the migrations ConfigMap from migrations/ and run the 
 	kubectl delete job shortn-migrate --ignore-not-found
 	kubectl apply -f deploy/k8s/migrate-job.yaml
 
-k8s-up: kind-up k8s-ingress-controller metrics-server images kind-load helm-install k8s-migrate ## one button: cluster + ingress + metrics + images + chart + migrations
+k8s-up: kind-up k8s-ingress-controller metrics-server sealed-secrets images kind-load helm-install k8s-migrate ## one button: cluster + ingress + metrics + sealed-secrets + images + chart + migrations
 	@echo "shortn is coming up — watch the pods settle with: make k8s-status"
 
 k8s-status: ## pods, services, statefulsets, jobs at a glance
