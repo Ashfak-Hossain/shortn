@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: shortn-redpanda
+  labels:
+    app: shortn-redpanda
+spec:
+  serviceName: shortn-redpanda
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shortn-redpanda
+  template:
+    metadata:
+      labels:
+        app: shortn-redpanda
+    spec:
+      containers:
+        - name: redpanda
+          image: redpandadata/redpanda:v26.1.10
+          args:
+            - redpanda
+            - start
+            - --mode=dev-container # single-node dev defaults
+            - --smp=1 # 1 core, tiny footprint
+            - --kafka-addr=internal://0.0.0.0:9092
+            - --advertise-kafka-addr=internal://shortn-redpanda:9092 # ← the k8s Service DNS, the critical line
+          ports:
+            - { name: kafka, containerPort: 9092 }
+            - { name: admin, containerPort: 9644 }
+          readinessProbe:
+            exec:
+              command:
+                ["sh", "-c", "rpk cluster health | grep -q 'Healthy:.*true'"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

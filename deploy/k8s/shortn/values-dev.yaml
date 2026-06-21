@@ -1,0 +1,13 @@
+# Dev overrides — local kind cluster, images loaded via `kind load`.
+image:
+  registry: "" # local images, no registry prefix
+  tag: dev
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1 # one instance — WORKER_ID must be unique per pod (Snowflake)
+  autoscaling:
+    enabled: true # demo the HPA (WORKER_ID caveat documented in the runbook)
+
+ingress:
+  host: shortn.localhost

@@ -1,0 +1,9 @@
+# local provider plugins + state — never commit state (it can hold secrets)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+# kubeconfig the kind provider writes for the cluster (holds admin creds)
+*-config
+# .terraform.lock.hcl IS committed on purpose (it pins provider versions)

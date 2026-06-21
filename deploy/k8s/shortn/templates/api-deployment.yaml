@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortn-api
+  labels:
+    app: shortn-api
+spec:
+  {{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicas }} # the HPA owns replicas when autoscaling is on
+  {{- end }}
+  selector:
+    matchLabels:
+      app: shortn-api
+  template:
+    metadata:
+      labels:
+        app: shortn-api
+    spec:
+      containers:
+        - name: api
+          image: '{{ .Values.image.registry }}shortn-api:{{ .Values.image.tag }}'
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: shortn-api-config
+            - secretRef:
+                name: shortn-api-secret
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}

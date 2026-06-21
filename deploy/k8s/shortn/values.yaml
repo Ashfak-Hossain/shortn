@@ -1,0 +1,37 @@
+# Default values for the shortn chart.
+# values-dev.yaml / values-prod.yaml override these per environment.
+
+image:
+  # Prefix prepended to every image name; INCLUDE a trailing slash.
+  # "" = local images loaded into kind.
+  registry: ""
+  tag: dev
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1 # used only when autoscaling is disabled
+  autoscaling:
+    enabled: false # dev turns this on; prod uses fixed replicas
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 50
+  resources:
+    requests: # guaranteed floor
+      cpu: 50m
+      memory: 64Mi
+    limits: # ceiling — over memory ⇒ OOM-killed
+      cpu: 250m
+      memory: 128Mi
+
+analytics:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+ingress:
+  host: shortn.localhost

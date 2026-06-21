@@ -1,0 +1,8 @@
+apiVersion: v2
+name: shortn
+description: The shortn URL shortener — API, analytics consumer, and its datastores.
+type: application
+# version is the CHART's version (bump when the chart changes); appVersion tracks
+# the application release the chart deploys (informational only).
+version: 0.1.0
+appVersion: "0.1.0"

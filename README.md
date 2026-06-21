@@ -60,6 +60,39 @@ go test -tags integration ./...
 
 Config is read from the environment: `PORT`, `LOG_LEVEL`, `ENV`, `DATABASE_URL`, `REDIS_URL`.
 
+## Deploy (Kubernetes)
+
+The whole stack runs on a local **kind** cluster, packaged as a **Helm** chart
+(`deploy/k8s/shortn`), delivered by **ArgoCD** (GitOps), with the cluster and ArgoCD install
+themselves declared in **Terraform** (`deploy/terraform`). The API's Secret is committed only
+as an encrypted **SealedSecret** — never plaintext. Every `make` target for this is in the
+[Makefile](Makefile); the full walkthrough is [docs/phases/phase-7.md](docs/phases/phase-7.md).
+
+**Quick bring-up (Helm CLI):**
+
+```sh
+make k8s-up        # kind + ingress + metrics-server + sealed-secrets + images + chart + migrations
+make k8s-status    # watch pods settle
+curl -H "Host: shortn.localhost" localhost/healthz   # 200 through the ingress
+```
+
+**GitOps bring-up (Terraform builds the platform, ArgoCD deploys the app):**
+
+```sh
+make tf-init && make tf-apply        # Terraform: kind cluster + ArgoCD
+kind export kubeconfig --name shortn # point kubectl at the new cluster
+make sealed-secrets && make kind-load && make argocd-app && make k8s-migrate
+```
+
+What it demonstrates:
+
+- **GitOps** — ArgoCD continuously reconciles the cluster to git; manual drift **self-heals**, a merge that changes the chart deploys itself ([ADR 0012](docs/architecture/0012-gitops-delivery.md)).
+- **Zero-downtime rolling updates** — readiness-gated surge + graceful drain + a post-`SIGTERM` delay that beats the endpoint-deregistration race (zero 5xx under load).
+- **Autoscaling** — an HPA scales the API on CPU (`make k8s-load` to exercise it).
+- **Stateful data survives** — Postgres on a PVC outlives pod restarts; the API/analytics are stateless ([ADR 0011](docs/architecture/0011-orchestration.md)).
+- **Secrets** — SealedSecrets keep only ciphertext in git; the controller decrypts in-cluster ([runbook](docs/runbook.md#secrets-sealed-secrets)).
+- **CI → registry** — `.github/workflows/ci.yml` builds multi-arch images for `api` + `analytics` and pushes them to **GHCR** on every merge to `master` ([ADR 0013](docs/architecture/0013-infrastructure-as-code.md)).
+
 ## Architecture
 
 Clean, layered design with dependency inversion:

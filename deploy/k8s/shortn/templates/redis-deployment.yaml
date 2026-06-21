@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortn-redis
+  labels:
+    app: shortn-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shortn-redis
+  template:
+    metadata:
+      labels:
+        app: shortn-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"] # ready only when it answers PONG
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

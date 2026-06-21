@@ -1,0 +1,22 @@
+{{- if .Values.api.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: shortn-api
+  labels:
+    app: shortn-api
+spec:
+  scaleTargetRef: # what to scale: the API Deployment
+    apiVersion: apps/v1
+    kind: Deployment
+    name: shortn-api
+  minReplicas: {{ .Values.api.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.api.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization # target = % of REQUESTED cpu, averaged across pods
+          averageUtilization: {{ .Values.api.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

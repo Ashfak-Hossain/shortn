@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortn-analytics
+  labels:
+    app: shortn-analytics
+spec:
+  replicas: {{ .Values.analytics.replicas }} # 1 topic partition → 1 active consumer; extra replicas would sit idle
+  selector:
+    matchLabels:
+      app: shortn-analytics
+  template:
+    metadata:
+      labels:
+        app: shortn-analytics
+    spec:
+      containers:
+        - name: analytics
+          image: "{{ .Values.image.registry }}shortn-analytics:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080 # /metrics only
+          envFrom: # reuse the API's config + secret (DATABASE_URL, KAFKA_BROKERS, …)
+            - configMapRef:
+                name: shortn-api-config
+            - secretRef:
+                name: shortn-api-secret
+          livenessProbe:
+            httpGet:
+              path: /metrics # its only endpoint; 200 = process alive
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.analytics.resources | nindent 12 }}

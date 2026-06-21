@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shortn-migrate
+  labels:
+    app: shortn-migrate
+spec:
+  backoffLimit: 3 # retry a few times if Postgres is briefly unready
+  template:
+    metadata:
+      labels:
+        app: shortn-migrate
+    spec:
+      restartPolicy: Never # a Job runs to completion, it doesn't "stay up"
+      containers:
+        - name: migrate
+          image: migrate/migrate
+          command: # override entrypoint with a shell so $DATABASE_URL expands
+            - /bin/sh
+            - -c
+            - migrate -path /migrations -database "$DATABASE_URL" up
+          env:
+            - name: DATABASE_URL # reuse the Secret — one source of truth, no duplicated DSN
+              valueFrom:
+                secretKeyRef:
+                  name: shortn-api-secret
+                  key: DATABASE_URL
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      volumes:
+        - name: migrations
+          configMap:
+            name: shortn-migrations # mounts all 6 .sql files at /migrations

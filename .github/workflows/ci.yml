@@ -50,3 +50,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --build-arg SERVICE=api -t shortn-api:ci .
+
+  # Build & push multi-arch images to GHCR — only after the checks pass, and only
+  # on a real merge to master (not PRs or feature branches).
+  push-image:
+    needs: [lint, test, integration, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # lets GITHUB_TOKEN push to GHCR
+    strategy:
+      matrix:
+        service: [api, analytics] # build both from the one parameterized Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3 # emulators for cross-arch builds
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: SERVICE=${{ matrix.service }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # GHCR image paths must be lowercase, hence the literal owner.
+          tags: |
+            ghcr.io/ashfak-hossain/shortn-${{ matrix.service }}:${{ github.sha }}
+            ghcr.io/ashfak-hossain/shortn-${{ matrix.service }}:latest

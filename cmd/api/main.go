@@ -51,6 +51,12 @@ const requestTimeout = 2 * time.Second
 // cover client retries, short enough to self-clean.
 const idempotencyTTL = 24 * time.Hour
 
+// preStopDelay keeps the server accepting connections briefly after SIGTERM so
+// Kubernetes removes this pod from the Service/Ingress endpoints before it stops —
+// otherwise the load balancer routes new requests to a terminating pod and clients
+// get 502s during a rolling update (the deregistration race).
+const preStopDelay = 5 * time.Second
+
 func main() {
 	// ============================================================
 	// CONFIGURATION & ID GENERATOR
@@ -276,6 +282,9 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	logger.Info("shutdown signal received, draining connections")
+
+	// Stay in the load balancer's rotation just long enough to be deregistered.
+	time.Sleep(preStopDelay)
 
 	// Give in-flight requests up to 10s to finish before forcing termination.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

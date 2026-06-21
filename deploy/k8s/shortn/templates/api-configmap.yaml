@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shortn-api-config
+  labels:
+    app: shortn-api
+data:
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  ENV: "dev"
+  WORKER_ID: "0" # unique per instance, now good for replicas=1
+  KAFKA_BROKERS: "shortn-redpanda:9092"
+  KAFKA_TOPIC: "shortn.clicks"
+  RATE_LIMIT_RPS: "1000"
+  RATE_LIMIT_BURST: "2000"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "shortn-tempo:4318" # no Tempo in-cluster yet; exporter is lazy + non-fatal
+  OTEL_SEMCONV_STABILITY_OPT_IN: "http/dup" # emit the *seconds* latency histogram (matches compose)

@@ -3,6 +3,12 @@
   "go.lintTool": "golangci-lint",
   "go.lintOnSave": "package",
   "editor.formatOnSave": true,
+  // Go templates in Helm charts ({{ ... }}) break when a YAML formatter "tidies"
+  // them, so disable on-save YAML formatting.
+  "yaml.format.enable": false,
+  "[yaml]": {
+    "editor.formatOnSave": false
+  },
   "[go]": {
     "editor.defaultFormatter": "golang.go",
     "editor.codeActionsOnSave": {

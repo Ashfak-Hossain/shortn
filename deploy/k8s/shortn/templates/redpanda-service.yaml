@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shortn-redpanda
+  labels:
+    app: shortn-redpanda
+spec:
+  clusterIP: None
+  selector:
+    app: shortn-redpanda
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+    - name: admin
+      port: 9644
+      targetPort: 9644
