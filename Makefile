@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller metrics-server argocd-install argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller metrics-server argocd-install argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -14,6 +14,7 @@ INGRESS_NGINX_REF ?= main
 ARGOCD_REF ?= stable
 HELM_RELEASE ?= shortn
 CHART ?= deploy/k8s/shortn
+TF_DIR ?= deploy/terraform
 
 help: ## list available targets (this menu)
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -151,3 +152,16 @@ k8s-load: ## drive CPU load from an in-cluster pod to trigger the HPA (stop with
 
 k8s-load-stop: ## stop and remove the load generator pod
 	kubectl delete pod loadgen --ignore-not-found
+
+# ------------ terraform (iac) ------------
+tf-init: ## terraform: download providers (run once)
+	terraform -chdir=$(TF_DIR) init
+
+tf-plan: ## terraform: preview what would change vs state
+	terraform -chdir=$(TF_DIR) plan
+
+tf-apply: ## terraform: create/update the cluster + ArgoCD from code
+	terraform -chdir=$(TF_DIR) apply
+
+tf-destroy: ## terraform: tear down everything Terraform manages
+	terraform -chdir=$(TF_DIR) destroy
