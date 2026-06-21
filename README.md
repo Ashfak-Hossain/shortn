@@ -8,7 +8,8 @@ A distributed URL shortener built as a practice project of distributed systems a
 
 A distributed, event-driven URL shortener. `POST /api/links` returns a short code; `GET /{code}` 302-redirects — served from a Redis read-through cache (Postgres on a miss), behind an **nginx** load balancer across multiple stateless API instances. Short codes come from a coordination-free **Snowflake-style** generator and are obfuscated with **sqids** so they're non-sequential. Each click publishes a `LinkClicked` event to **Redpanda** (Kafka API) and returns immediately; a separate `cmd/analytics` consumer drains the log into Postgres with **exactly-once processing** — the Kafka offset is committed in the same transaction as the click, so a crash or restart never loses or double-counts. Clean layered architecture (`http` → domain → `store`); the cache and event publisher sit behind interfaces so the domain never learns Redis or Kafka exists, and cache/broker failures fail open. Unit + integration (testcontainers) tests, green CI; runs with `docker compose up`.
 Since then the system gained **resilience** (Phase 5 — timeouts, a Redis-backed distributed rate limiter, a circuit breaker, idempotency keys, chaos-tested failure modes) and full **observability** (Phase 6 — metrics/logs/traces via OpenTelemetry, Grafana golden-signal dashboards, one click traceable end-to-end across the queue, SLO alerts; see [Observability](#observability) below).
-Next: **Phase 7 — Kubernetes, GitOps & infrastructure-as-code** (kind, Helm, ArgoCD, Terraform).
+Phase 7 added **Kubernetes delivery**: the stack runs on `kind` as a Helm chart, delivered by **ArgoCD** (GitOps, self-healing), autoscaled by an HPA, with zero-downtime rolling updates, the cluster + ArgoCD declared in **Terraform**, and secrets committed only as encrypted **SealedSecrets** — see [Deploy (Kubernetes)](#deploy-kubernetes).
+Next: **Phase 8 — load testing & performance numbers** (k6).
 
 ## Run
 

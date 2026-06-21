@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/Ashfak-Hossain/shortn.git
-    targetRevision: K8s-gitops-ias # the branch ArgoCD tracks (switch to master at phase end)
+    targetRevision: master # the branch ArgoCD tracks
     path: deploy/k8s/shortn # the Helm chart in the repo
     helm:
       valueFiles:
