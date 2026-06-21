@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -15,6 +15,7 @@ ARGOCD_REF ?= stable
 HELM_RELEASE ?= shortn
 CHART ?= deploy/k8s/shortn
 TF_DIR ?= deploy/terraform
+SEAL_KEY_BACKUP ?= .secrets/sealed-secrets-key.yaml
 
 help: ## list available targets (this menu)
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -120,6 +121,15 @@ argocd-install: ## install ArgoCD into the cluster + wait for its server
 sealed-secrets: ## install the Sealed Secrets controller (decrypts SealedSecrets in-cluster)
 	kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/controller.yaml
 	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s
+
+seal-key-backup: ## save the controller's sealing key to .secrets/ (gitignored) — keep it safe; it decrypts your SealedSecrets
+	@mkdir -p $(dir $(SEAL_KEY_BACKUP))
+	kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml > $(SEAL_KEY_BACKUP)
+	@echo "backed up sealing key -> $(SEAL_KEY_BACKUP)"
+
+seal-key-restore: ## restore the backed-up sealing key onto a fresh cluster, then restart the controller to load it
+	kubectl apply -f $(SEAL_KEY_BACKUP)
+	kubectl delete pod -n kube-system -l name=sealed-secrets-controller
 
 argocd-app: ## register the shortn Application; ArgoCD then syncs the chart from git
 	kubectl apply -f deploy/k8s/argocd/shortn-application.yaml
