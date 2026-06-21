@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller metrics-server argocd-install argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -116,6 +116,10 @@ argocd-install: ## install ArgoCD into the cluster + wait for its server
 	kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/$(ARGOCD_REF)/manifests/install.yaml
 	kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
+
+sealed-secrets: ## install the Sealed Secrets controller (decrypts SealedSecrets in-cluster)
+	kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/controller.yaml
+	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s
 
 argocd-app: ## register the shortn Application; ArgoCD then syncs the chart from git
 	kubectl apply -f deploy/k8s/argocd/shortn-application.yaml
