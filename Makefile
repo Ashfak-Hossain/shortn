@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up down ps logs redpanda topics rpk chaos load kind-up kind-down kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -15,6 +15,7 @@ ARGOCD_REF ?= stable
 HELM_RELEASE ?= shortn
 CHART ?= deploy/k8s/shortn
 TF_DIR ?= deploy/terraform
+SEAL_KEY_BACKUP ?= .secrets/sealed-secrets-key.yaml
 
 help: ## list available targets (this menu)
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -57,6 +58,9 @@ migrate-down: ## roll back the last migration
 up: ## start the whole stack in the background
 	$(COMPOSE) up -d
 
+up-build: ## rebuild images from source, then start the stack (use after Go edits)
+	$(COMPOSE) up -d --build
+
 down: ## stop the stack (data volumes are kept)
 	$(COMPOSE) down
 
@@ -65,6 +69,9 @@ ps: ## show running services and their health
 
 logs: ## follow logs; pick one with SVC=, e.g. make logs SVC=redpanda
 	$(COMPOSE) logs -f $(SVC)
+
+nginx-reload: ## apply nginx.conf edits (recreates the container — robust vs the macOS bind-mount atomic-save staleness)
+	$(COMPOSE) up -d --force-recreate nginx
 
 prune: ## remove all dangling images that are not being used by a running container
 	docker image prune
@@ -92,12 +99,33 @@ chaos: ## take each dependency down in turn and assert documented behavior (docs
 load: ## drive preview traffic so the Phase 6 dashboards move (k6 via docker; needs the stack up)
 	docker run --rm -i --network shortn_default -e BASE_URL=http://nginx grafana/k6 run - < load/preview.js
 
+# ------------ load testing (k6) ------------
+# Defaults hit the compose stack's nginx on :80 (where the Grafana dashboards live).
+# For the kind ingress: make load-redirect LOAD_BASE_URL=http://localhost LOAD_HOST=shortn.localhost
+LOAD_BASE_URL ?= http://localhost
+LOAD_HOST ?=
+LOAD_RATE ?= 1000
+LOAD_DURATION ?= 1m
+LOAD_POOL ?= 200
+
+load-redirect: ## k6 open-model redirect-heavy run (override LOAD_RATE / LOAD_DURATION / LOAD_BASE_URL / LOAD_HOST)
+	k6 run -e BASE_URL=$(LOAD_BASE_URL) -e HOST_HEADER=$(LOAD_HOST) -e RATE=$(LOAD_RATE) -e DURATION=$(LOAD_DURATION) -e POOL=$(LOAD_POOL) load/redirect.js
+
+load-create: ## k6 create-heavy run (write path; same LOAD_* overrides)
+	k6 run -e BASE_URL=$(LOAD_BASE_URL) -e HOST_HEADER=$(LOAD_HOST) -e RATE=$(LOAD_RATE) -e DURATION=$(LOAD_DURATION) load/create.js
+
 # ------------ kubernetes (kind) ------------
 kind-up: ## create the local kind cluster (no-op if it already exists)
 	kind get clusters | grep -qx $(KIND_CLUSTER) || kind create cluster --name $(KIND_CLUSTER) --config $(KIND_CONFIG)
 
 kind-down: ## delete the kind cluster (wipes the whole cluster)
 	kind delete cluster --name $(KIND_CLUSTER)
+
+kind-stop: ## pause the cluster: stop its node container (frees :80/:443 for compose; cluster + data survive)
+	docker stop $(KIND_CLUSTER)-control-plane
+
+kind-start: ## resume a paused cluster: start its node container back up
+	docker start $(KIND_CLUSTER)-control-plane
 
 kind-load: ## copy the built api+analytics images into the cluster's image store
 	kind load docker-image $(API_IMAGE) $(ANALYTICS_IMAGE) --name $(KIND_CLUSTER)
@@ -120,6 +148,16 @@ argocd-install: ## install ArgoCD into the cluster + wait for its server
 sealed-secrets: ## install the Sealed Secrets controller (decrypts SealedSecrets in-cluster)
 	kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/controller.yaml
 	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s
+
+seal-key-backup: ## save the controller's sealing key to .secrets/ (gitignored) — keep it safe; it decrypts your SealedSecrets
+	@mkdir -p $(dir $(SEAL_KEY_BACKUP))
+	kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml > $(SEAL_KEY_BACKUP)
+	@echo "backed up sealing key -> $(SEAL_KEY_BACKUP)"
+
+seal-key-restore: ## restore the backed-up sealing key onto a fresh cluster, then restart the controller to load it
+	kubectl apply -f $(SEAL_KEY_BACKUP) || echo "  apply skipped — key already present; restarting controller to load it"
+	kubectl rollout restart deployment sealed-secrets-controller -n kube-system
+	kubectl rollout status deployment sealed-secrets-controller -n kube-system --timeout=120s
 
 argocd-app: ## register the shortn Application; ArgoCD then syncs the chart from git
 	kubectl apply -f deploy/k8s/argocd/shortn-application.yaml
