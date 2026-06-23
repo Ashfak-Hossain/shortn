@@ -8,7 +8,9 @@ data:
   PORT: "8080"
   LOG_LEVEL: "info"
   ENV: "dev"
-  WORKER_ID: "0" # unique per instance, now good for replicas=1
+  # WORKER_ID intentionally unset — each pod leases a unique worker id from Redis
+  # at startup (internal/idgen/lease.go), so replicas > 1 is now collision-safe.
+  # The lease owner token is INSTANCE_ID, which defaults to the (unique) pod name.
   KAFKA_BROKERS: "shortn-redpanda:9092"
   KAFKA_TOPIC: "shortn.clicks"
   RATE_LIMIT_RPS: "1000"
