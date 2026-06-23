@@ -59,33 +59,13 @@ const preStopDelay = 5 * time.Second
 
 func main() {
 	// ============================================================
-	// CONFIGURATION & ID GENERATOR
+	// CONFIGURATION
 	// ============================================================
 
-	// Fail fast: a bad config or worker ID must never boot into a running state.
+	// Fail fast: a bad config must never boot into a running state.
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
-		os.Exit(1)
-	}
-	if cfg.WorkerID == "" {
-		slog.Error("WORKER_ID is required")
-		os.Exit(1)
-	}
-	wid, err := strconv.ParseUint(cfg.WorkerID, 10, 16)
-	if err != nil || wid > 1023 {
-		slog.Error("WORKER_ID must be an integer in [0, 1023]", "value", cfg.WorkerID)
-		os.Exit(1)
-	}
-	sq, err := sqids.New(sqids.Options{Alphabet: cfg.SqidsAlphabet})
-	if err != nil {
-		slog.Error("failed to initialise sqids encoder", "err", err)
-		os.Exit(1)
-	}
-
-	gen, err := idgen.NewSnowflakeGenerator(uint16(wid), sq)
-	if err != nil {
-		slog.Error("failed to create ID generator", "err", err)
 		os.Exit(1)
 	}
 
@@ -192,6 +172,54 @@ func main() {
 	defer cancelRedisPing()
 	if err := rdb.Ping(redisPingCtx).Err(); err != nil {
 		logger.Warn("redis not reachable at startup; serving uncached from postgres", "err", err)
+	}
+
+	// ============================================================
+	// ID GENERATOR (worker ID + Snowflake)
+	// ============================================================
+
+	// Each instance needs a UNIQUE worker ID or two pods can mint the same code.
+	// An explicit WORKER_ID wins (docker-compose, where IDs are assigned by hand);
+	// otherwise lease a free slot from Redis (Kubernetes, where every pod runs the
+	// same image with no per-pod env). A pod that cannot get a unique ID refuses to
+	// start — unlike the cache, ID assignment cannot "fail open".
+	var wid uint64
+	if cfg.WorkerID != "" {
+		wid, err = strconv.ParseUint(cfg.WorkerID, 10, 16)
+		if err != nil || wid > 1023 {
+			logger.Error("WORKER_ID must be an integer in [0, 1023]", "value", cfg.WorkerID)
+			os.Exit(1)
+		}
+	} else {
+		leaseCtx, cancelLease := context.WithTimeout(context.Background(), 10*time.Second)
+		lease, err := idgen.AcquireWorkerID(leaseCtx, rdb, cfg.InstanceID, logger)
+		cancelLease()
+		if err != nil {
+			logger.Error("failed to acquire worker id lease", "err", err)
+			os.Exit(1)
+		}
+		// Free the slot on the way out so a replacement pod reuses it immediately.
+		// Registered after rdb's Close defer, so (LIFO) it runs before rdb closes.
+		defer func() {
+			relCtx, cancelRel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancelRel()
+			if err := lease.Release(relCtx); err != nil {
+				logger.Warn("failed to release worker id lease", "err", err)
+			}
+		}()
+		wid = uint64(lease.WorkerID)
+		logger.Info("acquired worker id via redis lease", "worker_id", lease.WorkerID)
+	}
+
+	sq, err := sqids.New(sqids.Options{Alphabet: cfg.SqidsAlphabet})
+	if err != nil {
+		logger.Error("failed to initialise sqids encoder", "err", err)
+		os.Exit(1)
+	}
+	gen, err := idgen.NewSnowflakeGenerator(uint16(wid), sq)
+	if err != nil {
+		logger.Error("failed to create ID generator", "err", err)
+		os.Exit(1)
 	}
 
 	// ============================================================
