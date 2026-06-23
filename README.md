@@ -124,8 +124,30 @@ is the consistent ~1.7× reduction at the mean and tail. The bigger production w
 local microsecond delta: a cache **hit never touches Postgres** (verified by resolving a
 cached code with Postgres stopped), so the database is shielded from the read-heavy redirect
 path and from hot-key stampedes (collapsed via `singleflight`). Cache failures **fail open** —
-a Redis outage degrades latency, never correctness. Realistic load numbers, where the DB
-carries network latency and contention, come with the k6 suite in Phase 8.
+a Redis outage degrades latency, never correctness.
+
+### Load testing & a real bottleneck (Phase 8)
+
+Driven with **k6** (open model — a fixed arrival rate, so real overload is visible) against the
+stack: a redirect-heavy workload (the realistic ~99% read path) and a create-heavy one. The headline
+is a **found → fixed → re-measured** bottleneck. nginx had **no upstream `keepalive`**, so it opened
+a fresh TCP connection to the API on every request (and piled up `TIME_WAIT` sockets). Adding a
+keepalive pool (`keepalive 64` + HTTP/1.1 + cleared `Connection` header) cut redirect **p99 ~15×**
+under identical load:
+
+| redirect @ 200 req/s | before (no keepalive) | after (keepalive) |
+| -------------------- | --------------------- | ----------------- |
+| median               | 1.64 ms               | 1.63 ms (unchanged) |
+| p95                  | 12.9 ms               | 4.4 ms            |
+| **p99**              | **172 ms**            | **11 ms**         |
+
+The median didn't move — the app was always fast per-request — so this was a **connection/queueing**
+problem, not compute; the fix crushed the tail. At 500 req/s the same change turned a runaway queue
+(p99 1.8 s, dropped requests) into fully-sustained load. The API also **autoscales**: under CPU load
+the HPA scaled `shortn-api` **1 → 4** pods within seconds and back to 1 after the stabilization
+window. All numbers are from a single laptop with the load generator co-resident, so the trustworthy
+signal is the **relative** before/after and the **shapes**, not absolute RPS — stated honestly rather
+than inflated.
 
 ## Observability
 
