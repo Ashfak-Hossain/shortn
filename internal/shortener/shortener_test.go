@@ -221,3 +221,51 @@ func TestNormalizeURL(t *testing.T) {
 		})
 	}
 }
+
+// TestNormalizeURL_BlocksInternalDestinations verifies the SSRF/abuse guard: IP-literal
+// destinations in private, loopback, link-local (incl. the cloud-metadata IP), and
+// unspecified ranges are refused. net.IP.IsPrivate() alone would miss most of these.
+func TestNormalizeURL_BlocksInternalDestinations(t *testing.T) {
+	blocked := []struct {
+		name string
+		url  string
+	}{
+		{"loopback v4", "http://127.0.0.1/admin"},
+		{"loopback v6", "http://[::1]:5432"},
+		{"private 10/8", "http://10.0.0.5:8080"},
+		{"private 192.168/16", "http://192.168.1.1"},
+		{"private 172.16/12", "http://172.16.0.1"},
+		{"private v6 fc00::/7", "http://[fd00::1]"},
+		{"link-local v4", "http://169.254.0.1"},
+		{"cloud metadata", "http://169.254.169.254/latest/meta-data/"},
+		{"link-local v6", "http://[fe80::1]"},
+		{"unspecified", "http://0.0.0.0"},
+	}
+
+	for _, tc := range blocked {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeURL(tc.url); !errors.Is(err, ErrInvalidURL) {
+				t.Fatalf("normalizeURL(%q) error = %v, want ErrInvalidURL", tc.url, err)
+			}
+		})
+	}
+}
+
+// TestNormalizeURL_AllowsPublicDestinations is the guard against over-blocking:
+// legitimate public hosts — including a public IP literal — must still pass.
+func TestNormalizeURL_AllowsPublicDestinations(t *testing.T) {
+	allowed := []string{
+		"https://example.com",
+		"https://example.com/path?q=1",
+		"http://8.8.8.8", // a public IP literal is fine
+		"https://sub.domain.example.org:8443/x",
+	}
+
+	for _, u := range allowed {
+		t.Run(u, func(t *testing.T) {
+			if _, err := normalizeURL(u); err != nil {
+				t.Fatalf("normalizeURL(%q) error = %v, want nil", u, err)
+			}
+		})
+	}
+}
