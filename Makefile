@@ -96,7 +96,7 @@ chaos: ## take each dependency down in turn and assert documented behavior (docs
 load: ## drive preview traffic so the Phase 6 dashboards move (k6 via docker; needs the stack up)
 	docker run --rm -i --network shortn_default -e BASE_URL=http://nginx grafana/k6 run - < load/preview.js
 
-# ------------ load testing (phase 8, k6) ------------
+# ------------ load testing (k6) ------------
 # Defaults hit the compose stack's nginx on :80 (where the Grafana dashboards live).
 # For the kind ingress: make load-redirect LOAD_BASE_URL=http://localhost LOAD_HOST=shortn.localhost
 LOAD_BASE_URL ?= http://localhost
