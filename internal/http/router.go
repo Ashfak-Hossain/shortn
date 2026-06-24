@@ -74,10 +74,12 @@ func NewRouter(d RouterDeps) http.Handler {
 
 		// API endpoints
 		r.Post("/api/links", h.createLink)
+		r.Get("/api/links", h.listLinks)
 		r.Get("/{code}", h.redirect)
 
 		// Analytics
 		r.Get("/api/links/{code}/stats", h.stats)
+		r.Delete("/api/links/{code}", h.deleteLink)
 	})
 
 	// otelhttp is the OUTERMOST layer: it reads the inbound W3C traceparent, starts

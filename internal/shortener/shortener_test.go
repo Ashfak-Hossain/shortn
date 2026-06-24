@@ -46,6 +46,25 @@ func (f *fakeStore) GetStats(_ context.Context, _ string) (Stats, error) {
 	return Stats{}, nil
 }
 
+// List satisfies LinkStore. The domain method is a passthrough, so the fake
+// returns everything it holds (order is unimportant for the unit tests).
+func (f *fakeStore) List(_ context.Context, _, _ int) ([]*Link, error) {
+	links := make([]*Link, 0, len(f.byCode))
+	for _, l := range f.byCode {
+		links = append(links, l)
+	}
+	return links, nil
+}
+
+// Delete satisfies LinkStore, mirroring the real store's ErrNotFound on a miss.
+func (f *fakeStore) Delete(_ context.Context, code string) error {
+	if _, ok := f.byCode[code]; !ok {
+		return ErrNotFound
+	}
+	delete(f.byCode, code)
+	return nil
+}
+
 // stubGen is a deterministic, mock implementation of the IDGenerator interface.
 // By yielding scripted codes in a specific order, we can reliably simulate
 // non-deterministic events (like random code collisions) in our test suite.

@@ -17,6 +17,8 @@ type fakeStore struct {
 	getByCode func(ctx context.Context, code string) (*shortener.Link, error)
 	create    func(ctx context.Context, link *shortener.Link) error
 	getStats  func(ctx context.Context, code string) (shortener.Stats, error)
+	list      func(ctx context.Context, limit, offset int) ([]*shortener.Link, error)
+	delete    func(ctx context.Context, code string) error
 }
 
 func (f *fakeStore) GetByCode(ctx context.Context, code string) (*shortener.Link, error) {
@@ -29,6 +31,14 @@ func (f *fakeStore) Create(ctx context.Context, link *shortener.Link) error {
 
 func (f *fakeStore) GetStats(ctx context.Context, code string) (shortener.Stats, error) {
 	return f.getStats(ctx, code)
+}
+
+func (f *fakeStore) List(ctx context.Context, limit, offset int) ([]*shortener.Link, error) {
+	return f.list(ctx, limit, offset)
+}
+
+func (f *fakeStore) Delete(ctx context.Context, code string) error {
+	return f.delete(ctx, code)
 }
 
 // discardLogger silences the breaker's OnStateChange warnings during tests.

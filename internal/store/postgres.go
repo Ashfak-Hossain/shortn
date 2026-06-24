@@ -82,3 +82,45 @@ func (p *Postgres) GetByCode(ctx context.Context, code string) (*shortener.Link,
 	}
 	return &link, nil
 }
+
+// List returns links ordered newest-first, paged with limit/offset for the
+// dashboard. created_at isn't a unique sort key, so id breaks ties to keep paging
+// stable. Click totals are deliberately NOT read here — links.click_count is
+// unused; the stats endpoint sources real clicks from click_events.
+func (p *Postgres) List(ctx context.Context, limit, offset int) ([]*shortener.Link, error) {
+	const query = `
+		SELECT id, code, long_url, created_at, expires_at, click_count
+		FROM links
+		ORDER BY created_at DESC, id DESC
+		LIMIT $1 OFFSET $2`
+	rows, err := p.pool.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*shortener.Link
+	for rows.Next() {
+		var l shortener.Link
+		if err := rows.Scan(&l.ID, &l.Code, &l.LongURL, &l.CreatedAt, &l.ExpiresAt, &l.ClickCount); err != nil {
+			return nil, err
+		}
+		links = append(links, &l)
+	}
+	return links, rows.Err()
+}
+
+// Delete removes the link with the given code. RowsAffected distinguishes "deleted"
+// from "nothing matched": zero rows means the code never existed, reported as
+// ErrNotFound so the handler answers 404 rather than a misleading success.
+func (p *Postgres) Delete(ctx context.Context, code string) error {
+	const query = `DELETE FROM links WHERE code = $1`
+	tag, err := p.pool.Exec(ctx, query, code)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return shortener.ErrNotFound
+	}
+	return nil
+}

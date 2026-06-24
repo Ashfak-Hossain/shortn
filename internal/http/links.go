@@ -11,12 +11,20 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Ashfak-Hossain/shortn/internal/events"
 	"github.com/Ashfak-Hossain/shortn/internal/shortener"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+)
+
+// Pagination bounds for GET /api/links. A cap stops a client asking for the whole
+// table in one request.
+const (
+	defaultListLimit = 50
+	maxListLimit     = 100
 )
 
 // handler serves as the central dependency container for all API routes.
@@ -55,6 +63,22 @@ type statsResponse struct {
 type bucketResponse struct {
 	Bucket time.Time `json:"bucket"`
 	Count  int64     `json:"count"`
+}
+
+// linkSummary is one row in the dashboard's link list. Clicks are intentionally
+// omitted — links.click_count is unused; real per-link totals come from the
+// stats endpoint, not this list.
+type linkSummary struct {
+	Code      string    `json:"code"`
+	ShortURL  string    `json:"short_url"`
+	LongURL   string    `json:"long_url"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// listResponse wraps the page in an object (not a bare array) so we can add
+// paging metadata later without breaking the JSON contract.
+type listResponse struct {
+	Links []linkSummary `json:"links"`
 }
 
 // createLink handles the POST /api/links endpoint.
@@ -235,4 +259,76 @@ func (h *handler) respondWithCode(w http.ResponseWriter, r *http.Request, code s
 		return
 	}
 	writeCreatedLink(w, r, link)
+}
+
+// listLinks handles GET /api/links — the dashboard's manage view. Links come back
+// newest-first, paged with ?limit and ?offset.
+func (h *handler) listLinks(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", defaultListLimit)
+	if limit < 1 || limit > maxListLimit {
+		limit = defaultListLimit
+	}
+	offset := queryInt(r, "offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
+
+	links, err := h.svc.List(r.Context(), limit, offset)
+	if err != nil {
+		if serviceUnavailable(err) {
+			writeError(w, http.StatusServiceUnavailable, "service temporarily unavailable")
+			return
+		}
+		h.logger.Error("list links failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not list links")
+		return
+	}
+
+	// make(...) not nil, so an empty page serializes as [] rather than null.
+	resp := listResponse{Links: make([]linkSummary, 0, len(links))}
+	for _, l := range links {
+		resp.Links = append(resp.Links, linkSummary{
+			Code:      l.Code,
+			ShortURL:  shortURL(r, l.Code),
+			LongURL:   l.LongURL,
+			CreatedAt: l.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// deleteLink handles DELETE /api/links/{code}: 204 on success, 404 when the code
+// doesn't exist.
+func (h *handler) deleteLink(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+
+	err := h.svc.Delete(r.Context(), code)
+	if err != nil {
+		if errors.Is(err, shortener.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "no link for that code")
+			return
+		}
+		if serviceUnavailable(err) {
+			writeError(w, http.StatusServiceUnavailable, "service temporarily unavailable")
+			return
+		}
+		h.logger.Error("delete link failed", "err", err, "code", code)
+		writeError(w, http.StatusInternalServerError, "could not delete link")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// queryInt reads an integer query parameter, returning def when it's absent or
+// not a valid integer. The caller enforces bounds.
+func queryInt(r *http.Request, name string, def int) int {
+	v := r.URL.Query().Get(name)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }

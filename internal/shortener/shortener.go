@@ -48,6 +48,10 @@ type LinkStore interface {
 	GetByCode(ctx context.Context, code string) (*Link, error)
 	// GetStats returns the click analytics for a code.
 	GetStats(ctx context.Context, code string) (Stats, error)
+	// List returns links newest-first for the dashboard, paged by limit/offset.
+	List(ctx context.Context, limit, offset int) ([]*Link, error)
+	// Delete removes a link by code, returning ErrNotFound if no such code exists.
+	Delete(ctx context.Context, code string) error
 }
 
 // IDGenerator defines the contract for producing unique identifiers.
@@ -127,6 +131,16 @@ func (s *Service) Resolve(ctx context.Context, code string) (*Link, error) {
 // Stats returns the click analytics for a short code.
 func (s *Service) Stats(ctx context.Context, code string) (Stats, error) {
 	return s.store.GetStats(ctx, code)
+}
+
+// List returns a page of links, newest first, for the dashboard's manage view.
+func (s *Service) List(ctx context.Context, limit, offset int) ([]*Link, error) {
+	return s.store.List(ctx, limit, offset)
+}
+
+// Delete removes the link for a code. It returns ErrNotFound if the code is unknown.
+func (s *Service) Delete(ctx context.Context, code string) error {
+	return s.store.Delete(ctx, code)
 }
 
 // normalizeURL trims whitespace, forces a valid structure, and ensures the

@@ -113,6 +113,31 @@ func (s *ResilientStore) GetStats(ctx context.Context, code string) (shortener.S
 	return res.(shortener.Stats), nil
 }
 
+// List reads a page of links with the breaker and retry protection — it's a read,
+// so a transient blip gets the same few quick retries as GetByCode.
+func (s *ResilientStore) List(ctx context.Context, limit, offset int) ([]*shortener.Link, error) {
+	res, err := s.execute(func() (any, error) { // breaker
+		return s.retryRead(ctx, func() (any, error) { // retry
+			return s.next.List(ctx, limit, offset) // db call
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res.([]*shortener.Link), nil
+}
+
+// Delete removes a link through the breaker. Like Create, writes are NOT retried:
+// a retry whose first attempt actually succeeded would see ErrNotFound and report
+// a spurious miss. ErrNotFound is "expected" (isExpected), so deleting a missing
+// code never trips the breaker.
+func (s *ResilientStore) Delete(ctx context.Context, code string) error {
+	_, err := s.execute(func() (any, error) {
+		return nil, s.next.Delete(ctx, code)
+	})
+	return err
+}
+
 // retryRead runs op with exponential backoff + jitter, bounded by both
 // retryMaxElapsed and the request context. A domain outcome like ErrNotFound is
 // treated as permanent — a clean miss is final, not a transient fault to retry.
