@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -53,6 +53,31 @@ migrate-up: ## apply all migrations
 
 migrate-down: ## roll back the last migration
 	migrate -path migrations -database "$(DATABASE_URL)" down 1
+
+DB_BACKUP_DIR ?= backups
+
+db-backup: ## dump the compose Postgres (compressed custom format) into $(DB_BACKUP_DIR)/
+	@mkdir -p $(DB_BACKUP_DIR)
+	$(COMPOSE) exec -T postgres pg_dump -U dev -Fc shortn > $(DB_BACKUP_DIR)/shortn-$$(date +%Y%m%d-%H%M%S).dump
+	@echo "backup written under $(DB_BACKUP_DIR)/"
+
+db-restore: ## restore a dump into the compose Postgres: make db-restore FILE=backups/<file>.dump (DROPS + recreates objects)
+	@test -n "$(FILE)" || { echo "usage: make db-restore FILE=$(DB_BACKUP_DIR)/<file>.dump"; exit 1; }
+	$(COMPOSE) exec -T postgres pg_restore -U dev -d shortn --clean --if-exists < $(FILE)
+	@echo "restored from $(FILE)"
+
+db-verify: ## restore drill: load the latest dump into a scratch DB and compare row counts (an untested backup is not a backup)
+	@set -e; \
+	dump=$$(ls -t $(DB_BACKUP_DIR)/*.dump 2>/dev/null | head -1); \
+	test -n "$$dump" || { echo "no dump in $(DB_BACKUP_DIR)/ — run 'make db-backup' first"; exit 1; }; \
+	echo "restoring $$dump into scratch DB shortn_verify ..."; \
+	$(COMPOSE) exec -T postgres dropdb -U dev --if-exists shortn_verify; \
+	$(COMPOSE) exec -T postgres createdb -U dev shortn_verify; \
+	$(COMPOSE) exec -T postgres pg_restore -U dev -d shortn_verify <"$$dump"; \
+	echo "live   links = $$($(COMPOSE) exec -T postgres psql -U dev -d shortn        -tAc 'select count(*) from links')"; \
+	echo "restored links = $$($(COMPOSE) exec -T postgres psql -U dev -d shortn_verify -tAc 'select count(*) from links')"; \
+	$(COMPOSE) exec -T postgres dropdb -U dev shortn_verify; \
+	echo "verified — scratch DB dropped"
 
 # ------------ local stack (docker compose) ------------
 up: ## start the whole stack in the background
@@ -180,7 +205,7 @@ k8s-migrate: ## (re)build the migrations ConfigMap from migrations/ and run the 
 	kubectl delete job shortn-migrate --ignore-not-found
 	kubectl apply -f deploy/k8s/migrate-job.yaml
 
-k8s-up: kind-up k8s-ingress-controller metrics-server sealed-secrets images kind-load helm-install k8s-migrate ## one button: cluster + ingress + metrics + sealed-secrets + images + chart + migrations
+k8s-up: kind-up k8s-ingress-controller metrics-server sealed-secrets seal-key-restore images kind-load helm-install k8s-migrate ## one button (from scratch): cluster + ingress + metrics + sealed-secrets + KEY RESTORE + images + chart + migrations
 	@echo "shortn is coming up — watch the pods settle with: make k8s-status"
 
 k8s-status: ## pods, services, statefulsets, jobs at a glance

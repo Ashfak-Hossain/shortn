@@ -17,6 +17,8 @@ go.work.sum
 !.env.example
 # sealed-secrets controller private key backup (restore onto a fresh cluster) — NEVER commit
 .secrets/
+# database dumps may contain real user data — NEVER commit
+/backups/
 
 # === macOS ===
 .DS_Store
