@@ -243,7 +243,7 @@ func (h *handler) stats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := statsResponse{Code: s.Code, Total: s.Total}
+	resp := statsResponse{Code: s.Code, Total: s.Total, Series: []bucketResponse{}}
 	for _, b := range s.Series {
 		resp.Series = append(resp.Series, bucketResponse{Bucket: b.Bucket, Count: b.Count})
 	}
