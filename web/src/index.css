@@ -1,0 +1,23 @@
+@import 'tailwindcss';
+
+/* Class-based dark mode: `dark:` variants apply when <html> has the `dark` class
+   (toggled by src/theme.ts, set pre-paint by the script in index.html). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Subtle dotted-grid texture so the page isn't flat. Fixed so it doesn't re-tile
+   while scrolling. */
+body {
+  background-color: #f8fafc; /* slate-50 */
+  background-image: radial-gradient(circle at 1px 1px, #e2e8f0 1px, transparent 0);
+  background-size: 18px 18px;
+  background-attachment: fixed;
+}
+
+.dark body {
+  background-color: #020617; /* slate-950 */
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    #1e293b 1px,
+    transparent 0
+  ); /* slate-800 dots */
+}
