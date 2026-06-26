@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy azure-kubeconfig azure-tunnel azure-nodes azure-secret azure-deploy azure-status azure-migrate azure-logs azure-image
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -232,3 +232,48 @@ tf-apply: ## terraform: create/update the cluster + ArgoCD from code
 
 tf-destroy: ## terraform: tear down everything Terraform manages
 	terraform -chdir=$(TF_DIR) destroy
+
+# ------------ azure (live k3s deploy) ------------
+AZURE_IP ?= 20.205.250.1
+AZURE_SSH_KEY ?= ~/.ssh/shortn_azure
+AZURE_KUBECONFIG ?= $(HOME)/.kube/shortn-azure.yaml
+# every azure-* command below targets the LIVE cluster through the tunnel:
+AZ_KUBECTL = KUBECONFIG=$(AZURE_KUBECONFIG) kubectl
+AZ_HELM = KUBECONFIG=$(AZURE_KUBECONFIG) helm
+
+azure-kubeconfig: ## copy the cluster's kubeconfig from the VM to the laptop (run once)
+	scp -i $(AZURE_SSH_KEY) azureuser@$(AZURE_IP):.kube/config $(AZURE_KUBECONFIG)
+	@echo "saved -> $(AZURE_KUBECONFIG)"
+
+azure-tunnel: ## open the SSH tunnel to the k8s API — RUN IN ITS OWN TERMINAL, leave it open
+	ssh -i $(AZURE_SSH_KEY) -o ServerAliveInterval=60 -o ServerAliveCountMax=3 \
+	  -L 6443:127.0.0.1:6443 -N azureuser@$(AZURE_IP)
+
+azure-nodes: ## check the laptop can reach the live cluster (tunnel must be up)
+	$(AZ_KUBECTL) get nodes
+
+azure-secret: ## create the API's DB/Redis Secret on the live cluster (tunnel must be up)
+	$(AZ_KUBECTL) create secret generic shortn-api-secret \
+	  --from-literal=DATABASE_URL='postgres://dev:dev@shortn-postgres:5432/shortn?sslmode=disable' \
+	  --from-literal=REDIS_URL='redis://shortn-redis:6379/0'
+
+azure-deploy: ## install/upgrade the lean chart on the live cluster (tunnel must be up)
+	$(AZ_HELM) upgrade --install $(HELM_RELEASE) $(CHART) \
+	  -f $(CHART)/values-azure.yaml --set ingress.host=$(AZURE_IP).nip.io
+
+azure-status: ## pods / services / ingress on the live cluster (tunnel must be up)
+	$(AZ_KUBECTL) get pods,svc,ingress
+
+azure-migrate: ## run DB migrations on the live Postgres (temporary port-forward; tunnel + migrate CLI needed)
+	$(AZ_KUBECTL) port-forward svc/shortn-postgres 5433:5432 & \
+	  pf=$$!; sleep 3; \
+	  migrate -path migrations -database 'postgres://dev:dev@127.0.0.1:5433/shortn?sslmode=disable' up; \
+	  kill $$pf
+
+azure-logs: ## tail the live API logs (tunnel must be up)
+	$(AZ_KUBECTL) logs -l app=shortn-api --tail=100 -f
+
+azure-image: ## rebuild + push a fresh amd64 API image tagged with the current commit
+	docker buildx build --platform linux/amd64 --build-arg SERVICE=api \
+	  -t ghcr.io/ashfak-hossain/shortn-api:$$(git rev-parse --short HEAD) --push .
+	@echo "pushed shortn-api:$$(git rev-parse --short HEAD) — set this tag in $(CHART)/values-azure.yaml, then run: make azure-deploy"

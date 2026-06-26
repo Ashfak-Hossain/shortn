@@ -1,0 +1,25 @@
+# Azure single-node k3s — lean "core" profile: API + Postgres + Redis + ingress.
+# Redpanda + the analytics consumer are OFF (memory), and the committed SealedSecret
+# is OFF (no sealed-secrets controller here — we create the Secret directly).
+image:
+  registry: ghcr.io/ashfak-hossain/
+  tag: e88aec9 # fresh amd64 build from the front-end branch (has list/delete, SSRF block, stats fix)
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1
+  autoscaling:
+    enabled: false
+
+analytics:
+  enabled: false
+
+redpanda:
+  enabled: false
+
+sealedSecret:
+  enabled: false
+
+ingress:
+  className: traefik # k3s ships Traefik, not nginx-ingress
+  host: REPLACE_ME.nip.io # override at install: --set ingress.host=<public-ip>.nip.io

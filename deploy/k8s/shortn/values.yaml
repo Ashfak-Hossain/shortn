@@ -24,6 +24,7 @@ api:
       memory: 128Mi
 
 analytics:
+  enabled: true # set false to run the core shortener without the async consumer
   replicas: 1
   resources:
     requests:
@@ -33,5 +34,16 @@ analytics:
       cpu: 250m
       memory: 128Mi
 
+# Redpanda + the analytics consumer are optional — a small/edge cluster can run
+# the core shortener without them (clicks just aren't recorded).
+redpanda:
+  enabled: true
+
+# We commit a SealedSecret (needs the sealed-secrets controller). On a cluster
+# without that controller, set this false and create the Secret directly.
+sealedSecret:
+  enabled: true
+
 ingress:
+  className: nginx
   host: shortn.localhost
