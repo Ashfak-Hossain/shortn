@@ -262,7 +262,7 @@ azure-secret: ## create/update the API Secret (DB/Redis/ADMIN_KEY) on the live c
 
 azure-deploy: ## install/upgrade the lean chart on the live cluster (tunnel must be up)
 	$(AZ_HELM) upgrade --install $(HELM_RELEASE) $(CHART) \
-	  -f $(CHART)/values-azure.yaml --set ingress.host=$(AZURE_IP).nip.io
+	  -f $(CHART)/values-azure.yaml
 
 azure-status: ## pods / services / ingress on the live cluster (tunnel must be up)
 	$(AZ_KUBECTL) get pods,svc,ingress

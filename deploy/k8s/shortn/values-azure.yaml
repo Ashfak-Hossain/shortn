@@ -29,4 +29,4 @@ sealedSecret:
 
 ingress:
   className: traefik # k3s ships Traefik, not nginx-ingress
-  host: REPLACE_ME.nip.io # override at install: --set ingress.host=<public-ip>.nip.io
+  host: shortn.ashfak.dev # the public hostname (Cloudflare-proxied)
