@@ -1,0 +1,38 @@
+{{- if .Values.web.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortn-web
+  labels:
+    app: shortn-web
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      app: shortn-web
+  template:
+    metadata:
+      labels:
+        app: shortn-web
+    spec:
+      containers:
+        - name: web
+          image: "{{ .Values.image.registry }}shortn-web:{{ .Values.web.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+          readinessProbe: # the SPA root; 200 means nginx is serving the build
+            httpGet:
+              path: /app/
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /app/
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+{{- end }}

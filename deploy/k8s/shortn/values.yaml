@@ -26,6 +26,20 @@ api:
       cpu: 250m
       memory: 128Mi
 
+# The React dashboard SPA, served under /app. Opt-in per profile (default off so
+# existing kind/prod deploys don't expect a web image); Azure enables it.
+web:
+  enabled: false
+  tag: dev
+  replicas: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
 analytics:
   enabled: true # set false to run the core shortener without the async consumer
   replicas: 1

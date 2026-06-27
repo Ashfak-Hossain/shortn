@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  base: '/app/',
   plugins: [react(), tailwindcss()],
   server: {
     // Dev only: forward API calls to the compose stack (nginx :80), so the

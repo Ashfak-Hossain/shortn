@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy azure-kubeconfig azure-tunnel azure-nodes azure-secret azure-deploy azure-status azure-migrate azure-logs azure-psql azure-admin-key azure-metrics azure-image
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy azure-kubeconfig azure-tunnel azure-nodes azure-secret azure-deploy azure-status azure-migrate azure-logs azure-psql azure-admin-key azure-metrics azure-image azure-web-image
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -292,3 +292,8 @@ azure-image: ## rebuild + push a fresh amd64 API image tagged with the current c
 	docker buildx build --platform linux/amd64 --build-arg SERVICE=api \
 	  -t ghcr.io/ashfak-hossain/shortn-api:$$(git rev-parse --short HEAD) --push .
 	@echo "pushed shortn-api:$$(git rev-parse --short HEAD) — set this tag in $(CHART)/values-azure.yaml, then run: make azure-deploy"
+
+azure-web-image: ## rebuild + push a fresh amd64 dashboard (web) image tagged with the current commit
+	docker buildx build --platform linux/amd64 \
+	  -t ghcr.io/ashfak-hossain/shortn-web:$$(git rev-parse --short HEAD) --push web
+	@echo "pushed shortn-web:$$(git rev-parse --short HEAD) — set web.tag in $(CHART)/values-azure.yaml, then run: make azure-deploy"

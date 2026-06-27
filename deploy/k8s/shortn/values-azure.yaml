@@ -14,6 +14,10 @@ api:
     rps: 20
     burst: 40
 
+web:
+  enabled: true
+  tag: REPLACE_ME # set to the web image tag after `make azure-web-image`
+
 analytics:
   enabled: false
 
