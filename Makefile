@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy azure-kubeconfig azure-tunnel azure-nodes azure-secret azure-deploy azure-status azure-migrate azure-logs azure-psql azure-admin-key azure-metrics azure-image azure-web-image
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -53,6 +53,31 @@ migrate-up: ## apply all migrations
 
 migrate-down: ## roll back the last migration
 	migrate -path migrations -database "$(DATABASE_URL)" down 1
+
+DB_BACKUP_DIR ?= backups
+
+db-backup: ## dump the compose Postgres (compressed custom format) into $(DB_BACKUP_DIR)/
+	@mkdir -p $(DB_BACKUP_DIR)
+	$(COMPOSE) exec -T postgres pg_dump -U dev -Fc shortn > $(DB_BACKUP_DIR)/shortn-$$(date +%Y%m%d-%H%M%S).dump
+	@echo "backup written under $(DB_BACKUP_DIR)/"
+
+db-restore: ## restore a dump into the compose Postgres: make db-restore FILE=backups/<file>.dump (DROPS + recreates objects)
+	@test -n "$(FILE)" || { echo "usage: make db-restore FILE=$(DB_BACKUP_DIR)/<file>.dump"; exit 1; }
+	$(COMPOSE) exec -T postgres pg_restore -U dev -d shortn --clean --if-exists < $(FILE)
+	@echo "restored from $(FILE)"
+
+db-verify: ## restore drill: load the latest dump into a scratch DB and compare row counts (an untested backup is not a backup)
+	@set -e; \
+	dump=$$(ls -t $(DB_BACKUP_DIR)/*.dump 2>/dev/null | head -1); \
+	test -n "$$dump" || { echo "no dump in $(DB_BACKUP_DIR)/ — run 'make db-backup' first"; exit 1; }; \
+	echo "restoring $$dump into scratch DB shortn_verify ..."; \
+	$(COMPOSE) exec -T postgres dropdb -U dev --if-exists shortn_verify; \
+	$(COMPOSE) exec -T postgres createdb -U dev shortn_verify; \
+	$(COMPOSE) exec -T postgres pg_restore -U dev -d shortn_verify <"$$dump"; \
+	echo "live   links = $$($(COMPOSE) exec -T postgres psql -U dev -d shortn        -tAc 'select count(*) from links')"; \
+	echo "restored links = $$($(COMPOSE) exec -T postgres psql -U dev -d shortn_verify -tAc 'select count(*) from links')"; \
+	$(COMPOSE) exec -T postgres dropdb -U dev shortn_verify; \
+	echo "verified — scratch DB dropped"
 
 # ------------ local stack (docker compose) ------------
 up: ## start the whole stack in the background
@@ -180,7 +205,7 @@ k8s-migrate: ## (re)build the migrations ConfigMap from migrations/ and run the 
 	kubectl delete job shortn-migrate --ignore-not-found
 	kubectl apply -f deploy/k8s/migrate-job.yaml
 
-k8s-up: kind-up k8s-ingress-controller metrics-server sealed-secrets images kind-load helm-install k8s-migrate ## one button: cluster + ingress + metrics + sealed-secrets + images + chart + migrations
+k8s-up: kind-up k8s-ingress-controller metrics-server sealed-secrets seal-key-restore images kind-load helm-install k8s-migrate ## one button (from scratch): cluster + ingress + metrics + sealed-secrets + KEY RESTORE + images + chart + migrations
 	@echo "shortn is coming up — watch the pods settle with: make k8s-status"
 
 k8s-status: ## pods, services, statefulsets, jobs at a glance
@@ -207,3 +232,68 @@ tf-apply: ## terraform: create/update the cluster + ArgoCD from code
 
 tf-destroy: ## terraform: tear down everything Terraform manages
 	terraform -chdir=$(TF_DIR) destroy
+
+# ------------ azure (live k3s deploy) ------------
+AZURE_IP ?= 20.205.250.1
+AZURE_SSH_KEY ?= ~/.ssh/shortn_azure
+AZURE_KUBECONFIG ?= $(HOME)/.kube/shortn-azure.yaml
+# every azure-* command below targets the LIVE cluster through the tunnel:
+AZ_KUBECTL = KUBECONFIG=$(AZURE_KUBECONFIG) kubectl
+AZ_HELM = KUBECONFIG=$(AZURE_KUBECONFIG) helm
+
+azure-kubeconfig: ## copy the cluster's kubeconfig from the VM to the laptop (run once)
+	scp -i $(AZURE_SSH_KEY) azureuser@$(AZURE_IP):.kube/config $(AZURE_KUBECONFIG)
+	@echo "saved -> $(AZURE_KUBECONFIG)"
+
+azure-tunnel: ## open the SSH tunnel to the k8s API — RUN IN ITS OWN TERMINAL, leave it open
+	ssh -i $(AZURE_SSH_KEY) -o ServerAliveInterval=60 -o ServerAliveCountMax=3 \
+	  -L 6443:127.0.0.1:6443 -N azureuser@$(AZURE_IP)
+
+azure-nodes: ## check the laptop can reach the live cluster (tunnel must be up)
+	$(AZ_KUBECTL) get nodes
+
+azure-secret: ## create/update the API Secret (DB/Redis/ADMIN_KEY) on the live cluster; pass ADMIN_KEY=... (tunnel must be up)
+	@test -n "$(ADMIN_KEY)" || { echo "ERROR: set ADMIN_KEY=... (generate one with: openssl rand -hex 32)"; exit 1; }
+	$(AZ_KUBECTL) create secret generic shortn-api-secret \
+	  --from-literal=DATABASE_URL='postgres://dev:dev@shortn-postgres:5432/shortn?sslmode=disable' \
+	  --from-literal=REDIS_URL='redis://shortn-redis:6379/0' \
+	  --from-literal=ADMIN_KEY='$(ADMIN_KEY)' \
+	  --dry-run=client -o yaml | $(AZ_KUBECTL) apply -f -
+
+azure-deploy: ## install/upgrade the lean chart on the live cluster (tunnel must be up)
+	$(AZ_HELM) upgrade --install $(HELM_RELEASE) $(CHART) \
+	  -f $(CHART)/values-azure.yaml
+
+azure-status: ## pods / services / ingress on the live cluster (tunnel must be up)
+	$(AZ_KUBECTL) get pods,svc,ingress
+
+azure-migrate: ## run DB migrations on the live Postgres (temporary port-forward; tunnel + migrate CLI needed)
+	$(AZ_KUBECTL) port-forward svc/shortn-postgres 5433:5432 & \
+	  pf=$$!; sleep 3; \
+	  migrate -path migrations -database 'postgres://dev:dev@127.0.0.1:5433/shortn?sslmode=disable' up; \
+	  kill $$pf
+
+azure-logs: ## tail the live API logs (tunnel must be up)
+	$(AZ_KUBECTL) logs -l app=shortn-api --tail=100 -f
+
+azure-psql: ## open a psql shell on the live Postgres — \dt to list tables (tunnel must be up)
+	$(AZ_KUBECTL) exec -it shortn-postgres-0 -- psql -U dev -d shortn
+
+azure-admin-key: ## print the ADMIN_KEY currently stored in the live Secret (tunnel must be up)
+	@$(AZ_KUBECTL) get secret shortn-api-secret -o jsonpath='{.data.ADMIN_KEY}' | base64 -d; echo
+
+azure-metrics: ## fetch /metrics from the API's internal ops port (9090, not public; tunnel must be up)
+	$(AZ_KUBECTL) port-forward deploy/shortn-api 9090:9090 & \
+	  pf=$$!; sleep 3; \
+	  curl -s localhost:9090/metrics | grep -E '^http_server' | head -30; \
+	  kill $$pf
+
+azure-image: ## rebuild + push a fresh amd64 API image tagged with the current commit
+	docker buildx build --platform linux/amd64 --build-arg SERVICE=api \
+	  -t ghcr.io/ashfak-hossain/shortn-api:$$(git rev-parse --short HEAD) --push .
+	@echo "pushed shortn-api:$$(git rev-parse --short HEAD) — set this tag in $(CHART)/values-azure.yaml, then run: make azure-deploy"
+
+azure-web-image: ## rebuild + push a fresh amd64 dashboard (web) image tagged with the current commit
+	docker buildx build --platform linux/amd64 \
+	  -t ghcr.io/ashfak-hossain/shortn-web:$$(git rev-parse --short HEAD) --push web
+	@echo "pushed shortn-web:$$(git rev-parse --short HEAD) — set web.tag in $(CHART)/values-azure.yaml, then run: make azure-deploy"

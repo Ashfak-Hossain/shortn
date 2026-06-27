@@ -20,6 +20,8 @@ type Config struct {
 	RateLimitRPS   string // RATE_LIMIT_RPS, sustained requests/sec per client, default "10"
 	RateLimitBurst string // RATE_LIMIT_BURST, token-bucket capacity (max burst), default "20"
 	OTELEndpoint   string // OTEL_EXPORTER_OTLP_ENDPOINT — Tempo's OTLP/HTTP address; where traces are pushed
+	AdminKey       string // ADMIN_KEY, shared secret gating list/delete; empty = admin endpoints locked (fail closed)
+	OpsPort        string // OPS_PORT, internal-only listener for /healthz, /readyz, /metrics (never behind the ingress), default 9090
 }
 
 // Load reads the configuration from the environment variables, applying
@@ -40,6 +42,8 @@ func Load() (Config, error) {
 		RateLimitRPS:   getEnv("RATE_LIMIT_RPS", "10"),
 		RateLimitBurst: getEnv("RATE_LIMIT_BURST", "20"),
 		OTELEndpoint:   getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4318"),
+		AdminKey:       os.Getenv("ADMIN_KEY"),
+		OpsPort:        getEnv("OPS_PORT", "9090"),
 	}, nil
 }
 

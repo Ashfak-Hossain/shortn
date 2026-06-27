@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 	"time"
 
@@ -69,4 +70,27 @@ func traceableRoute(r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// AdminAuthMiddleware gates the management surface (listing every link, deleting
+// a link) behind a single shared operator secret sent as the X-Admin-Key header.
+// The service has no user accounts, so one operator key is the right-sized control
+// — enough to keep the public internet out of admin operations without standing
+// up real authentication.
+//
+// It FAILS CLOSED: when no key is configured on the server, every admin request
+// is rejected. A blank key must never mean "open to all" — forgetting to set it
+// should lock the door, not remove it. subtle.ConstantTimeCompare keeps the check
+// from leaking the key through response-timing differences.
+func AdminAuthMiddleware(adminKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			provided := r.Header.Get("X-Admin-Key")
+			if adminKey == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(adminKey)) != 1 {
+				writeError(w, http.StatusUnauthorized, "admin authentication required")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

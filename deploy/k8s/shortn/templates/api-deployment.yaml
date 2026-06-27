@@ -21,7 +21,8 @@ spec:
           image: '{{ .Values.image.registry }}shortn-api:{{ .Values.image.tag }}'
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - containerPort: 8080
+            - containerPort: 8080 # public API + redirects (reached via the ingress)
+            - containerPort: 9090 # ops: health, readiness, metrics (NOT routed by the ingress)
           envFrom:
             - configMapRef:
                 name: shortn-api-config
@@ -30,13 +31,13 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8080
+              port: 9090
             initialDelaySeconds: 3
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 8080
+              port: 9090
             initialDelaySeconds: 3
             periodSeconds: 5
           resources:

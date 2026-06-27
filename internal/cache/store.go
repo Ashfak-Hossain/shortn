@@ -74,6 +74,27 @@ func (s *CachingStore) GetStats(ctx context.Context, code string) (shortener.Sta
 	return s.next.GetStats(ctx, code)
 }
 
+// List implements [shortener.LinkStore]. The link list isn't cached — it changes
+// on every create and delete and isn't on the redirect hot path — so this
+// delegates straight to the wrapped store.
+func (s *CachingStore) List(ctx context.Context, limit, offset int) ([]*shortener.Link, error) {
+	return s.next.List(ctx, limit, offset)
+}
+
+// Delete implements [shortener.LinkStore]. It removes the row from the source of
+// truth first, then drops the cached redirect so a deleted code stops resolving
+// at once instead of lingering until its TTL. A delete of a missing code returns
+// ErrNotFound from the store and never touches the cache.
+func (s *CachingStore) Delete(ctx context.Context, code string) error {
+	if err := s.next.Delete(ctx, code); err != nil {
+		return err
+	}
+	// Best-effort: Invalidate logs and returns any Redis error, but the entry's TTL
+	// is the backstop, so a failure here must not make Delete fail.
+	_ = s.Invalidate(ctx, code)
+	return nil
+}
+
 // GetByCode implements [shortener.LinkStore].
 // GetByCode serves from Redis on a hit, and on a miss collapses concurrent
 // lookups for the same code into a single store read via singleflight. Both

@@ -5,15 +5,15 @@ metadata:
   labels:
     app: shortn-api
 data:
-  PORT: "8080"
-  LOG_LEVEL: "info"
-  ENV: "dev"
+  PORT: '8080'
+  LOG_LEVEL: 'info'
+  ENV: 'dev'
   # WORKER_ID intentionally unset — each pod leases a unique worker id from Redis
   # at startup (internal/idgen/lease.go), so replicas > 1 is now collision-safe.
   # The lease owner token is INSTANCE_ID, which defaults to the (unique) pod name.
-  KAFKA_BROKERS: "shortn-redpanda:9092"
-  KAFKA_TOPIC: "shortn.clicks"
-  RATE_LIMIT_RPS: "1000"
-  RATE_LIMIT_BURST: "2000"
-  OTEL_EXPORTER_OTLP_ENDPOINT: "shortn-tempo:4318" # no Tempo in-cluster yet; exporter is lazy + non-fatal
-  OTEL_SEMCONV_STABILITY_OPT_IN: "http/dup" # emit the *seconds* latency histogram (matches compose)
+  KAFKA_BROKERS: 'shortn-redpanda:9092'
+  KAFKA_TOPIC: 'shortn.clicks'
+  RATE_LIMIT_RPS: "{{ .Values.api.rateLimit.rps }}" # per-client sustained; load-test headroom in dev, tightened low on public profiles
+  RATE_LIMIT_BURST: "{{ .Values.api.rateLimit.burst }}"
+  OTEL_EXPORTER_OTLP_ENDPOINT: 'shortn-tempo:4318' # no Tempo in-cluster yet; exporter is lazy + non-fatal
+  OTEL_SEMCONV_STABILITY_OPT_IN: 'http/dup' # emit the *seconds* latency histogram (matches compose)

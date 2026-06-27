@@ -1,3 +1,4 @@
+{{- if .Values.analytics.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,3 +34,4 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.analytics.resources | nindent 12 }}
+{{- end }}

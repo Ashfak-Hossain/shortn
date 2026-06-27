@@ -5,11 +5,22 @@ metadata:
   labels:
     app: shortn-api
 spec:
-  ingressClassName: nginx
+  ingressClassName: {{ .Values.ingress.className | default "nginx" }}
   rules:
     - host: {{ .Values.ingress.host }}
       http:
         paths:
+          {{- if .Values.web.enabled }}
+          # Dashboard SPA → web container. More specific than "/", so /app/* wins.
+          - path: /app
+            pathType: Prefix
+            backend:
+              service:
+                name: shortn-web
+                port:
+                  number: 80
+          {{- end }}
+          # Catch-all → api: serves /api/* AND the /{code} short-link redirects.
           - path: /
             pathType: Prefix
             backend:

@@ -17,12 +17,12 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # The three API replicas behind nginx. Each exposes "/metrics" once the OTel
-  # bootstrap ships
+  # The three API replicas behind nginx. /metrics moved to the internal ops port
+  # (9090) so it's never exposed on the public 8080; scrape it there.
   - job_name: shortn-api
     metrics_path: /metrics
     static_configs:
-      - targets: ['api-1:8080', 'api-2:8080', 'api-3:8080']
+      - targets: ['api-1:9090', 'api-2:9090', 'api-3:9090']
 
   # The analytics consumer gains a small HTTP server for "/metrics"
   - job_name: shortn-analytics

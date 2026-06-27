@@ -55,6 +55,26 @@ func (f *fakeStore) GetStats(_ context.Context, _ string) (shortener.Stats, erro
 	return shortener.Stats{}, nil
 }
 
+func (f *fakeStore) List(_ context.Context, _, _ int) ([]*shortener.Link, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	links := make([]*shortener.Link, 0, len(f.byCode))
+	for _, l := range f.byCode {
+		links = append(links, l)
+	}
+	return links, nil
+}
+
+func (f *fakeStore) Delete(_ context.Context, code string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.byCode[code]; !ok {
+		return shortener.ErrNotFound
+	}
+	delete(f.byCode, code)
+	return nil
+}
+
 // newTestStore wires a CachingStore over the fake store, backed by in-process Redis.
 // It returns the decorator and the miniredis handle (so a test can inspect cached
 // keys or kill Redis to exercise fail-open).

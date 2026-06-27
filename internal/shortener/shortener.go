@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -47,6 +48,10 @@ type LinkStore interface {
 	GetByCode(ctx context.Context, code string) (*Link, error)
 	// GetStats returns the click analytics for a code.
 	GetStats(ctx context.Context, code string) (Stats, error)
+	// List returns links newest-first for the dashboard, paged by limit/offset.
+	List(ctx context.Context, limit, offset int) ([]*Link, error)
+	// Delete removes a link by code, returning ErrNotFound if no such code exists.
+	Delete(ctx context.Context, code string) error
 }
 
 // IDGenerator defines the contract for producing unique identifiers.
@@ -128,6 +133,16 @@ func (s *Service) Stats(ctx context.Context, code string) (Stats, error) {
 	return s.store.GetStats(ctx, code)
 }
 
+// List returns a page of links, newest first, for the dashboard's manage view.
+func (s *Service) List(ctx context.Context, limit, offset int) ([]*Link, error) {
+	return s.store.List(ctx, limit, offset)
+}
+
+// Delete removes the link for a code. It returns ErrNotFound if the code is unknown.
+func (s *Service) Delete(ctx context.Context, code string) error {
+	return s.store.Delete(ctx, code)
+}
+
 // normalizeURL trims whitespace, forces a valid structure, and ensures the
 // destination utilizes a secure HTTP/HTTPS protocol.
 func normalizeURL(raw string) (string, error) {
@@ -161,5 +176,29 @@ func normalizeURL(raw string) (string, error) {
 	// and prevent duplicate logical entries stored under different casings.
 	u.Host = strings.ToLower(u.Host)
 
+	// Security: refuse destinations that are IP literals in private, loopback,
+	// link-local (incl. the cloud-metadata IP 169.254.169.254), or unspecified
+	// ranges. shortn never fetches the target server-side, so this isn't classic
+	// SSRF — it's hygiene + future-proofing, and it stops the shortener being used
+	// to point a victim's browser at internal addresses. Hostnames that *resolve*
+	// to such IPs are out of scope by design (no DNS lookup at create); the
+	// connect-time defense belongs at a future server-side fetch. See
+	// docs/concepts/security-ssrf-open-redirect.md.
+	if ip := net.ParseIP(u.Hostname()); ip != nil && isBlockedIP(ip) {
+		return "", fmt.Errorf("%w: destination address is not allowed", ErrInvalidURL)
+	}
+
 	return u.String(), nil
+}
+
+// isBlockedIP reports whether an IP-literal destination falls in a range we refuse
+// to shorten. net.IP.IsPrivate() alone is NOT enough — it misses loopback (127/8,
+// ::1) and link-local (169.254/16, which includes the cloud-metadata IP), so each
+// dangerous class is checked explicitly. IsMulticast covers link-local multicast.
+func isBlockedIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast()
 }

@@ -1,0 +1,71 @@
+# Scheduled logical backups of the Postgres StatefulSet — the in-cluster equivalent
+# of `make db-backup`. A CronJob runs pg_dump on a schedule, writes a compressed
+# custom-format dump to a dedicated PVC, and prunes dumps past the retention window.
+#
+# RIGHT-SIZED-FOR-LOCAL CAVEAT: the dump lands on a PVC in the SAME cluster, so it
+# survives pod/node restarts but NOT a cluster loss. Real production ships the dump
+# OFF-cluster to object storage (S3/GCS) with versioning + lifecycle retention.
+# Restore drill + procedure live in docs/runbook.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shortn-backups
+  labels:
+    app: shortn-postgres
+spec:
+  accessModes: ['ReadWriteOnce']
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: shortn-postgres-backup
+  labels:
+    app: shortn-postgres
+spec:
+  schedule: '0 3 * * *' # daily at 03:00 
+  concurrencyPolicy: Forbid # never let two backups overlap
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: postgres:16 # same image → pg_dump version matches the server
+              env:
+                - name: PGHOST
+                  value: shortn-postgres # the Postgres Service
+                - name: PGUSER
+                  value: dev
+                - name: PGPASSWORD
+                  value: dev # dev creds (mirrors the StatefulSet)
+                - name: PGDATABASE
+                  value: shortn
+                - name: RETENTION_DAYS
+                  value: '7'
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  ts=$(date +%Y%m%d-%H%M%S)
+                  out="/backups/shortn-$ts.dump"
+                  echo "dumping $PGDATABASE -> $out"
+                  pg_dump -Fc -f "$out"
+                  echo "pruning dumps older than ${RETENTION_DAYS}d"
+                  find /backups -name 'shortn-*.dump' -mtime +"${RETENTION_DAYS}" -delete
+                  echo "done. current backups:"
+                  ls -lh /backups
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: shortn-backups

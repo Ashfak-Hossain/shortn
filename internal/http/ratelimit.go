@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Ashfak-Hossain/shortn/internal/ratelimit"
@@ -37,13 +38,22 @@ func RateLimitMiddleware(limiter *ratelimit.Limiter, logger *slog.Logger) func(h
 	}
 }
 
-// clientIP returns the originating client address. nginx sets X-Real-IP to the
-// real connecting address ($remote_addr), which a client cannot spoof; we key
-// the limiter on that. Falling back to RemoteAddr covers direct, non-proxied
-// requests (e.g. local `make run`).
+// clientIP returns the originating client's address, used as the rate-limit key.
+//
+// In every deployment exactly one trusted proxy sits directly in front of the
+// API — nginx in compose, Traefik on k3s — and BOTH append the address they saw
+// connecting to the end of X-Forwarded-For. That right-most entry is therefore
+// the real edge client, and it is spoof-resistant: a client that forges an
+// X-Forwarded-For only prepends entries; the proxy still appends the true
+// address after them, so the last one wins. We deliberately do NOT trust
+// X-Real-IP — Traefik neither sets nor strips it, so on that path a client could
+// forge it to evade the limiter or poison another client's bucket.
 func clientIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
+			return ip
+		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
