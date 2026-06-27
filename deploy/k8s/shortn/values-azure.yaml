@@ -16,7 +16,7 @@ api:
 
 web:
   enabled: true
-  tag: REPLACE_ME # set to the web image tag after `make azure-web-image`
+  tag: 25d1128
 
 analytics:
   enabled: false
