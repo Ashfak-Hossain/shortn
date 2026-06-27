@@ -39,21 +39,20 @@ type IdempotencyStore interface {
 // readable as named fields instead of a long positional argument list.
 type RouterDeps struct {
 	Service        *shortener.Service
-	Pinger         Pinger
 	Logger         *slog.Logger
 	InstanceID     string // attached to every response as the X-Served-By header
 	RequestTimeout time.Duration
 	Limiter        *ratelimit.Limiter
 	Idempotency    IdempotencyStore
 	Publisher      Publisher
-	MetricsHandler http.Handler // promhttp handler; mounted at GET /metrics
+	AdminKey       string // ADMIN_KEY; gates list/delete via the X-Admin-Key header
 }
 
 // NewRouter returns a fully configured [http.Handler] with all application routes registered.
 func NewRouter(d RouterDeps) http.Handler {
 	// Bind the injected deps to our handler struct so they are
 	// safely accessible to the individual route methods.
-	h := &handler{svc: d.Service, pinger: d.Pinger, logger: d.Logger, publisher: d.Publisher, idem: d.Idempotency}
+	h := &handler{svc: d.Service, logger: d.Logger, publisher: d.Publisher, idem: d.Idempotency}
 
 	router := chi.NewRouter()
 
@@ -61,25 +60,23 @@ func NewRouter(d RouterDeps) http.Handler {
 	router.Use(TimeoutMiddleware(d.RequestTimeout))
 	router.Use(RouteTagMiddleware) // bounded route template → span name + metric label
 
-	// Op endpoints
-	router.Get("/healthz", healthz)
-	router.Get("/readyz", h.readyz)
-
-	// prometheus scrapes this.
-	router.Method(http.MethodGet, "/metrics", d.MetricsHandler)
-
 	// client-facing sits behind the rate limiter
 	router.Group(func(r chi.Router) {
 		r.Use(RateLimitMiddleware(d.Limiter, d.Logger))
 
-		// API endpoints
+		// Public endpoints — anyone may shorten, follow a link, or read a
+		// link's stats (knowing the code is the key for analytics).
 		r.Post("/api/links", h.createLink)
-		r.Get("/api/links", h.listLinks)
 		r.Get("/{code}", h.redirect)
-
-		// Analytics
 		r.Get("/api/links/{code}/stats", h.stats)
-		r.Delete("/api/links/{code}", h.deleteLink)
+
+		// Admin-only management surface: listing every link and deleting a link
+		// are gated behind the operator key (and still rate-limited).
+		r.Group(func(ar chi.Router) {
+			ar.Use(AdminAuthMiddleware(d.AdminKey))
+			ar.Get("/api/links", h.listLinks)
+			ar.Delete("/api/links/{code}", h.deleteLink)
+		})
 	})
 
 	// otelhttp is the OUTERMOST layer: it reads the inbound W3C traceparent, starts
@@ -90,6 +87,22 @@ func NewRouter(d RouterDeps) http.Handler {
 	return otelhttp.NewHandler(router, "http.server",
 		otelhttp.WithFilter(traceableRoute),
 	)
+}
+
+// NewOpsRouter returns the operational endpoints — liveness, readiness, and the
+// Prometheus scrape — on a listener SEPARATE from the public API. The ingress
+// only routes the public port, so these never reach the internet: only the
+// kubelet (probes) and in-cluster scrapers hit them directly on the pod. That
+// keeps /metrics (request-rate/latency internals) and /readyz (a live DB-health
+// probe) off the public surface.
+func NewOpsRouter(pinger Pinger, logger *slog.Logger, metrics http.Handler) http.Handler {
+	h := &handler{pinger: pinger, logger: logger}
+
+	mux := chi.NewRouter()
+	mux.Get("/healthz", healthz)
+	mux.Get("/readyz", h.readyz)
+	mux.Method(http.MethodGet, "/metrics", metrics)
+	return mux
 }
 
 // healthz implements a standard Kubernetes liveness probe.

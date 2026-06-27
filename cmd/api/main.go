@@ -271,14 +271,13 @@ func main() {
 
 	router := httpapi.NewRouter(httpapi.RouterDeps{
 		Service:        svc,
-		Pinger:         pool,
 		Logger:         logger,
 		InstanceID:     cfg.InstanceID,
 		RequestTimeout: requestTimeout,
 		Limiter:        limiter,
 		Idempotency:    idem,
 		Publisher:      pub,
-		MetricsHandler: providers.MetricsHandler,
+		AdminKey:       cfg.AdminKey,
 	})
 
 	// Strict server timeouts mitigate slowloris attacks and stop stale or malicious
@@ -290,6 +289,17 @@ func main() {
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
+	}
+
+	// Operational endpoints (health, readiness, metrics) listen on a SEPARATE,
+	// internal-only port. The ingress routes only cfg.Port, so /metrics and /readyz
+	// never reach the internet — the kubelet probes and in-cluster scrapers hit this
+	// port directly on the pod.
+	opsSrv := &http.Server{
+		Addr:         ":" + cfg.OpsPort,
+		Handler:      httpapi.NewOpsRouter(pool, logger, providers.MetricsHandler),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 
 	// ============================================================
@@ -304,6 +314,14 @@ func main() {
 		}
 	}()
 	logger.Info("server started", "addr", addr, "env", cfg.Env)
+
+	go func() {
+		if err := opsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("ops server failed", "err", err)
+			os.Exit(1)
+		}
+	}()
+	logger.Info("ops server started", "addr", ":"+cfg.OpsPort)
 
 	// Block until SIGINT (Ctrl+C) or SIGTERM (Docker/K8s stop).
 	sig := make(chan os.Signal, 1)
@@ -321,6 +339,7 @@ func main() {
 		logger.Error("graceful shutdown failed", "err", err)
 		os.Exit(1)
 	}
+	_ = opsSrv.Shutdown(ctx) // best-effort; no user traffic to drain on the ops port
 	logger.Info("server stopped cleanly")
 }
 

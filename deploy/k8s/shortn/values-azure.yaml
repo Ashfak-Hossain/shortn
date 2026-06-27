@@ -3,13 +3,16 @@
 # is OFF (no sealed-secrets controller here — we create the Secret directly).
 image:
   registry: ghcr.io/ashfak-hossain/
-  tag: e88aec9 # fresh amd64 build from the front-end branch (has list/delete, SSRF block, stats fix)
+  tag: 189ac42 # fresh amd64 build
   pullPolicy: IfNotPresent
 
 api:
   replicas: 1
   autoscaling:
     enabled: false
+  rateLimit: # public single node: tens-of-rps per client is plenty for real users, blunts abuse
+    rps: 20
+    burst: 40
 
 analytics:
   enabled: false

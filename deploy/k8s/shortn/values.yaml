@@ -15,6 +15,9 @@ api:
     minReplicas: 1
     maxReplicas: 4
     targetCPUUtilizationPercentage: 50
+  rateLimit: # per-client token bucket; high here for k6 load tests, public profiles override low
+    rps: 1000
+    burst: 2000
   resources:
     requests: # guaranteed floor
       cpu: 50m

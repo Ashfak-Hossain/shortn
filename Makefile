@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy azure-kubeconfig azure-tunnel azure-nodes azure-secret azure-deploy azure-status azure-migrate azure-logs azure-psql azure-image
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy azure-kubeconfig azure-tunnel azure-nodes azure-secret azure-deploy azure-status azure-migrate azure-logs azure-psql azure-admin-key azure-metrics azure-image
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -252,10 +252,13 @@ azure-tunnel: ## open the SSH tunnel to the k8s API — RUN IN ITS OWN TERMINAL,
 azure-nodes: ## check the laptop can reach the live cluster (tunnel must be up)
 	$(AZ_KUBECTL) get nodes
 
-azure-secret: ## create the API's DB/Redis Secret on the live cluster (tunnel must be up)
+azure-secret: ## create/update the API Secret (DB/Redis/ADMIN_KEY) on the live cluster; pass ADMIN_KEY=... (tunnel must be up)
+	@test -n "$(ADMIN_KEY)" || { echo "ERROR: set ADMIN_KEY=... (generate one with: openssl rand -hex 32)"; exit 1; }
 	$(AZ_KUBECTL) create secret generic shortn-api-secret \
 	  --from-literal=DATABASE_URL='postgres://dev:dev@shortn-postgres:5432/shortn?sslmode=disable' \
-	  --from-literal=REDIS_URL='redis://shortn-redis:6379/0'
+	  --from-literal=REDIS_URL='redis://shortn-redis:6379/0' \
+	  --from-literal=ADMIN_KEY='$(ADMIN_KEY)' \
+	  --dry-run=client -o yaml | $(AZ_KUBECTL) apply -f -
 
 azure-deploy: ## install/upgrade the lean chart on the live cluster (tunnel must be up)
 	$(AZ_HELM) upgrade --install $(HELM_RELEASE) $(CHART) \
@@ -275,6 +278,15 @@ azure-logs: ## tail the live API logs (tunnel must be up)
 
 azure-psql: ## open a psql shell on the live Postgres — \dt to list tables (tunnel must be up)
 	$(AZ_KUBECTL) exec -it shortn-postgres-0 -- psql -U dev -d shortn
+
+azure-admin-key: ## print the ADMIN_KEY currently stored in the live Secret (tunnel must be up)
+	@$(AZ_KUBECTL) get secret shortn-api-secret -o jsonpath='{.data.ADMIN_KEY}' | base64 -d; echo
+
+azure-metrics: ## fetch /metrics from the API's internal ops port (9090, not public; tunnel must be up)
+	$(AZ_KUBECTL) port-forward deploy/shortn-api 9090:9090 & \
+	  pf=$$!; sleep 3; \
+	  curl -s localhost:9090/metrics | grep -E '^http_server' | head -30; \
+	  kill $$pf
 
 azure-image: ## rebuild + push a fresh amd64 API image tagged with the current commit
 	docker buildx build --platform linux/amd64 --build-arg SERVICE=api \
