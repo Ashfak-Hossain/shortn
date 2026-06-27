@@ -3,7 +3,7 @@
 # is OFF (no sealed-secrets controller here — we create the Secret directly).
 image:
   registry: ghcr.io/ashfak-hossain/
-  tag: 189ac42 # fresh amd64 build
+  tag: 7b96592
   pullPolicy: IfNotPresent
 
 api:
