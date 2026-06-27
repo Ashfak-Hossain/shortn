@@ -1,4 +1,4 @@
-.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy azure-kubeconfig azure-tunnel azure-nodes azure-secret azure-deploy azure-status azure-migrate azure-logs azure-psql azure-admin-key azure-metrics azure-image azure-web-image
+.PHONY: help run run-analytics build test test-integration lint docker docker-analytics images migrate-up migrate-down db-backup db-restore db-verify up up-build down ps logs nginx-reload redpanda topics rpk chaos load load-redirect load-create kind-up kind-down kind-stop kind-start kind-load k8s-ingress-controller metrics-server argocd-install sealed-secrets seal-key-backup seal-key-restore argocd-app argocd-password argocd-ui helm-install helm-uninstall k8s-migrate k8s-up k8s-status k8s-logs k8s-load k8s-load-stop tf-init tf-plan tf-apply tf-destroy azure-kubeconfig azure-tunnel azure-nodes azure-secret azure-deploy azure-status azure-migrate azure-logs azure-psql azure-admin-key azure-metrics azure-image azure-web-image azure-top azure-cert-manager azure-cert-status
 
 DATABASE_URL ?= postgres://dev:dev@localhost:5432/shortn?sslmode=disable
 COMPOSE ?= docker compose -f deploy/compose/docker-compose.yml
@@ -266,6 +266,11 @@ azure-deploy: ## install/upgrade the lean chart on the live cluster (tunnel must
 
 azure-status: ## pods / services / ingress on the live cluster (tunnel must be up)
 	$(AZ_KUBECTL) get pods,svc,ingress
+
+azure-top: ## live CPU/memory of the node + each pod (uses metrics-server; tunnel must be up)
+	$(AZ_KUBECTL) top nodes
+	@echo "--- per pod (default namespace) ---"
+	$(AZ_KUBECTL) top pods
 
 azure-migrate: ## run DB migrations on the live Postgres (temporary port-forward; tunnel + migrate CLI needed)
 	$(AZ_KUBECTL) port-forward svc/shortn-postgres 5433:5432 & \

@@ -4,12 +4,14 @@ A distributed URL shortener built as a practice project of distributed systems a
 
 **Stack:** Go · PostgreSQL · Redis · Redpanda (Kafka) · nginx · Docker · GitHub Actions · Prometheus/Grafana/Loki/Tempo (OTel) · Kubernetes/Helm/ArgoCD · Terraform · React
 
+**Live:** **[shortn.ashfak.dev](https://shortn.ashfak.dev)** — open the [dashboard](https://shortn.ashfak.dev/app) or `POST` to the API. Runs on single-node **k3s** behind **Cloudflare** (HTTPS + DDoS protection).
+
 ## Status
 
 A distributed, event-driven URL shortener. `POST /api/links` returns a short code; `GET /{code}` 302-redirects — served from a Redis read-through cache (Postgres on a miss), behind an **nginx** load balancer across multiple stateless API instances. Short codes come from a coordination-free **Snowflake-style** generator and are obfuscated with **sqids** so they're non-sequential. Each click publishes a `LinkClicked` event to **Redpanda** (Kafka API) and returns immediately; a separate `cmd/analytics` consumer drains the log into Postgres with **exactly-once processing** — the Kafka offset is committed in the same transaction as the click, so a crash or restart never loses or double-counts. Clean layered architecture (`http` → domain → `store`); the cache and event publisher sit behind interfaces so the domain never learns Redis or Kafka exists, and cache/broker failures fail open. Unit + integration (testcontainers) tests, green CI; runs with `docker compose up`.
 Since then the system gained **resilience** (Phase 5 — timeouts, a Redis-backed distributed rate limiter, a circuit breaker, idempotency keys, chaos-tested failure modes) and full **observability** (Phase 6 — metrics/logs/traces via OpenTelemetry, Grafana golden-signal dashboards, one click traceable end-to-end across the queue, SLO alerts; see [Observability](#observability) below).
 Phase 7 added **Kubernetes delivery**: the stack runs on `kind` as a Helm chart, delivered by **ArgoCD** (GitOps, self-healing), autoscaled by an HPA, with zero-downtime rolling updates, the cluster + ArgoCD declared in **Terraform**, and secrets committed only as encrypted **SealedSecrets** — see [Deploy (Kubernetes)](#deploy-kubernetes).
-Next: **Phase 8 — load testing & performance numbers** (k6).
+Phases 8–9 followed: **load testing** (Phase 8 — k6 open-model runs, a p50/p95/p99 report, an autoscaling demo, one bottleneck found→fixed→re-measured), **production hardening** (Phase 8.5 — per-pod Snowflake worker-id leases from Redis, create-time SSRF/internal-address blocking, proven `pg_dump` backups), and a **React dashboard** + **live public deploy** (Phase 9 — Vite/TS/Tailwind/TanStack Query, light/dark; deployed on a single-node **k3s** cluster, served behind **Cloudflare** at [shortn.ashfak.dev](https://shortn.ashfak.dev) with HTTPS, DDoS protection, and an **admin-gated** management API). See [Deploy](#deploy-kubernetes).
 
 ## Run
 
@@ -135,11 +137,11 @@ a fresh TCP connection to the API on every request (and piled up `TIME_WAIT` soc
 keepalive pool (`keepalive 64` + HTTP/1.1 + cleared `Connection` header) cut redirect **p99 ~15×**
 under identical load:
 
-| redirect @ 200 req/s | before (no keepalive) | after (keepalive) |
-| -------------------- | --------------------- | ----------------- |
+| redirect @ 200 req/s | before (no keepalive) | after (keepalive)   |
+| -------------------- | --------------------- | ------------------- |
 | median               | 1.64 ms               | 1.63 ms (unchanged) |
-| p95                  | 12.9 ms               | 4.4 ms            |
-| **p99**              | **172 ms**            | **11 ms**         |
+| p95                  | 12.9 ms               | 4.4 ms              |
+| **p99**              | **172 ms**            | **11 ms**           |
 
 The median didn't move — the app was always fast per-request — so this was a **connection/queueing**
 problem, not compute; the fix crushed the tail. At 500 req/s the same change turned a runaway queue
