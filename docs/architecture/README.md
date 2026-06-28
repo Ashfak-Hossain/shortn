@@ -74,3 +74,4 @@ The number is an identity, not a priority. ADRs are cited by number ("see ADR
 | 0012 | [Continuous delivery: GitOps with ArgoCD, GHCR](0012-gitops-delivery.md)   | Accepted | 2026-06-19 |
 | 0013 | [Infrastructure as Code with Terraform](0013-infrastructure-as-code.md)    | Accepted | 2026-06-19 |
 | 0014 | [Worker ID assignment via Redis lease](0014-worker-id-assignment.md)       | Accepted | 2026-06-24 |
+| 0015 | [Web dashboard and admin-gated access](0015-web-dashboard-and-access.md)   | Accepted | 2026-06-27 |

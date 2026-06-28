@@ -6,7 +6,8 @@ decision record behind it. Granular history is in the git log; this is the reada
 ## Live public deployment and dashboard
 
 - A React dashboard (Vite + TypeScript) for creating links and viewing per-code analytics,
-  served under `/app`. See [deployment](docs/deployment.md).
+  served under `/app` ([ADR 0015](docs/architecture/0015-web-dashboard-and-access.md)). See
+  [deployment](docs/deployment.md).
 - Deployed on the public internet on single-node k3s behind Cloudflare (edge TLS, DDoS, hidden
   origin). Short links own the root; the dashboard sits at `/app`.
 - Locked down for public exposure: listing and deleting links are gated by an admin key

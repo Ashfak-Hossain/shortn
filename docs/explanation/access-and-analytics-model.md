@@ -132,6 +132,7 @@ deliberately not built here.
 ## See also
 
 - [ARCHITECTURE.md](../../ARCHITECTURE.md) — the system map this doc explains.
+- [ADR 0015 — Web dashboard and admin-gated access](../architecture/0015-web-dashboard-and-access.md) — the decision this model records.
 - [SSRF and open redirects](security-ssrf-and-redirects.md) — the create-time threat model
   and the rest of the public-internet defenses.
 - [Distributed IDs](distributed-ids.md) — why short codes are unguessable enough to act as
