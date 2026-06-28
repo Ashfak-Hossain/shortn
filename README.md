@@ -1,205 +1,118 @@
 # shortn
 
-A distributed URL shortener built as a practice project of distributed systems and DevOps concepts.
+A distributed URL shortener built to production-grade: caching, a message queue,
+resilience, observability, and a Kubernetes/GitOps deployment.
 
-**Stack:** Go · PostgreSQL · Redis · Redpanda (Kafka) · nginx · Docker · GitHub Actions · Prometheus/Grafana/Loki/Tempo (OTel) · Kubernetes/Helm/ArgoCD · Terraform · React
+[![CI](https://github.com/Ashfak-Hossain/shortn/actions/workflows/ci.yml/badge.svg)](https://github.com/Ashfak-Hossain/shortn/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.26-00ADD8.svg)](go.mod)
 
-**Live:** **[shortn.ashfak.dev](https://shortn.ashfak.dev)** — open the [dashboard](https://shortn.ashfak.dev/app) or `POST` to the API. Runs on single-node **k3s** behind **Cloudflare** (HTTPS + DDoS protection).
+**Live:** **[shortn.ashfak.dev](https://shortn.ashfak.dev)** — try the
+[dashboard](https://shortn.ashfak.dev/app), or `POST` to the API.
 
-## Status
+`POST /api/links` returns a short code; `GET /{code}` issues a `302` redirect. The redirect
+path is served from a Redis read-through cache backed by PostgreSQL, behind a load balancer
+across stateless API instances. Short codes come from a coordination-free Snowflake generator
+and are obfuscated with sqids. Every click is recorded asynchronously through Redpanda with
+exactly-once processing, so analytics never slow the redirect down.
 
-A distributed, event-driven URL shortener. `POST /api/links` returns a short code; `GET /{code}` 302-redirects — served from a Redis read-through cache (Postgres on a miss), behind an **nginx** load balancer across multiple stateless API instances. Short codes come from a coordination-free **Snowflake-style** generator and are obfuscated with **sqids** so they're non-sequential. Each click publishes a `LinkClicked` event to **Redpanda** (Kafka API) and returns immediately; a separate `cmd/analytics` consumer drains the log into Postgres with **exactly-once processing** — the Kafka offset is committed in the same transaction as the click, so a crash or restart never loses or double-counts. Clean layered architecture (`http` → domain → `store`); the cache and event publisher sit behind interfaces so the domain never learns Redis or Kafka exists, and cache/broker failures fail open. Unit + integration (testcontainers) tests, green CI; runs with `docker compose up`.
-Since then the system gained **resilience** (Phase 5 — timeouts, a Redis-backed distributed rate limiter, a circuit breaker, idempotency keys, chaos-tested failure modes) and full **observability** (Phase 6 — metrics/logs/traces via OpenTelemetry, Grafana golden-signal dashboards, one click traceable end-to-end across the queue, SLO alerts; see [Observability](#observability) below).
-Phase 7 added **Kubernetes delivery**: the stack runs on `kind` as a Helm chart, delivered by **ArgoCD** (GitOps, self-healing), autoscaled by an HPA, with zero-downtime rolling updates, the cluster + ArgoCD declared in **Terraform**, and secrets committed only as encrypted **SealedSecrets** — see [Deploy (Kubernetes)](#deploy-kubernetes).
-Phases 8–9 followed: **load testing** (Phase 8 — k6 open-model runs, a p50/p95/p99 report, an autoscaling demo, one bottleneck found→fixed→re-measured), **production hardening** (Phase 8.5 — per-pod Snowflake worker-id leases from Redis, create-time SSRF/internal-address blocking, proven `pg_dump` backups), and a **React dashboard** + **live public deploy** (Phase 9 — Vite/TS/Tailwind/TanStack Query, light/dark; deployed on a single-node **k3s** cluster, served behind **Cloudflare** at [shortn.ashfak.dev](https://shortn.ashfak.dev) with HTTPS, DDoS protection, and an **admin-gated** management API). See [Deploy](#deploy-kubernetes).
+## What it does
 
-## Run
+- **Shorten and redirect.** Create a link, follow a code with a `302`. The read path is
+  cache-aside on Redis; a cache hit never touches Postgres.
+- **Scales horizontally.** Stateless API instances behind a reverse proxy. Each instance
+  leases a unique Snowflake worker id, so id generation never collides as replicas grow.
+- **Records clicks asynchronously.** A redirect publishes a `LinkClicked` event and returns;
+  a separate consumer drains the log into Postgres, committing the queue offset in the same
+  transaction as the click insert (exactly-once).
+- **Stays up under failure.** Per-call timeouts, a distributed rate limiter, a circuit
+  breaker on Postgres, and idempotency keys. Cache and broker outages fail open.
+- **Is observable.** Metrics, logs, and traces through the OpenTelemetry SDK; one click is a
+  single trace from the edge through the queue to the analytics insert.
+- **Ships on Kubernetes.** Packaged as a Helm chart, delivered by ArgoCD (GitOps), autoscaled
+  by an HPA, with zero-downtime rolling updates; the cluster is declared in Terraform.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    cf[Cloudflare] --> proxy[Reverse proxy]
+    proxy -->|/app| web[Dashboard SPA]
+    proxy -->|"/ and /{code}"| api[API · stateless · N replicas]
+    api --> redis[(Redis)]
+    api --> pg[(PostgreSQL)]
+    api -->|click event| rp[Redpanda]
+    rp --> consumer[Analytics consumer] --> pg
+```
+
+The domain depends on interfaces, not concrete I/O: `internal/shortener` defines `LinkStore`
+and `IDGenerator` and imports no SQL and no `net/http`. The store, cache, circuit breaker,
+and id generator are implementations injected at the composition root, so each swaps without
+touching business logic. The full design, the request paths, and the C4 diagrams are in
+**[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
+## Performance
+
+Measured with k6 against the full stack. The headline is a found-fixed-remeasured bottleneck:
+nginx had no upstream keepalive, so it opened a fresh TCP connection per request. Adding a
+keepalive pool cut redirect **p99 from 172 ms to 11 ms** under identical load, with the median
+unchanged — a connection-queueing problem, not a compute one. Under CPU load the API
+autoscales 1 → 4 pods and back. The numbers come from a single laptop with the load generator
+co-resident, so the trustworthy signal is the relative before/after, not absolute throughput.
+Full method and results: **[docs/performance.md](docs/performance.md)**.
+
+## Tech stack
+
+| Concern        | Choice                                              |
+| -------------- | --------------------------------------------------- |
+| Language       | Go                                                  |
+| HTTP router    | chi v5                                              |
+| Database       | PostgreSQL (pgx)                                    |
+| Cache          | Redis                                               |
+| Message queue  | Redpanda (Kafka API)                                |
+| Reverse proxy  | nginx (Compose) · Traefik (Kubernetes)              |
+| Observability  | Prometheus · Grafana · Loki · Tempo (OpenTelemetry) |
+| Orchestration  | Kubernetes · Helm · ArgoCD                          |
+| Infrastructure | Terraform                                           |
+| Frontend       | React (Vite + TypeScript)                           |
+
+## Quick start
 
 Requires Go 1.26+, Docker, and `make`.
-
-### Full stack (API + Postgres + Redis) via Docker Compose
 
 ```sh
 docker compose -f deploy/compose/docker-compose.yml up --build
 ```
 
-This starts Postgres and Redis, applies migrations, and serves the API on `:8080`.
-
-### API examples
+This starts Postgres, Redis, and Redpanda, applies migrations, and serves the API behind
+nginx on `:80`.
 
 ```sh
 # create a short link
-curl -s -X POST localhost:8080/api/links -d '{"url":"https://example.com"}'
-# → {"code":"Ab3xK9p","short_url":"http://localhost:8080/Ab3xK9p","long_url":"https://example.com"}
+curl -s -X POST localhost/api/links -d '{"url":"https://example.com"}'
+# → {"code":"Ab3xK9p","short_url":"http://localhost/Ab3xK9p","long_url":"https://example.com"}
 
 # follow it — 302 redirect to the original URL
-curl -i localhost:8080/Ab3xK9p
+curl -i localhost/Ab3xK9p
 
 # errors use a consistent shape: {"error":"..."}
-curl -i localhost:8080/unknown                                    # 404
-curl -i -X POST localhost:8080/api/links -d '{"url":"not-a-url"}' # 400
+curl -i localhost/unknown                                # 404
+curl -i -X POST localhost/api/links -d '{"url":"nope"}'  # 400
 ```
 
-Health & readiness:
+The full local stack including the observability backends comes up with `make up` (Grafana on
+`localhost:3000`). The API contract is in [docs/reference/api.md](docs/reference/api.md).
 
-```sh
-curl -i localhost:8080/healthz   # 200 — liveness (dependency-free)
-curl -i localhost:8080/readyz    # 200 — readiness (checks the database)
-```
+## Documentation
 
-### Local development
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — system overview, diagrams, request paths.
+- **[Architecture Decision Records](docs/architecture/README.md)** — why each choice was made.
+- **[docs/](docs/README.md)** — the full index: explanation deep-dives, reference, operations.
+- **[Deployment](docs/deployment.md)** — how the live system is wired and run.
+- **[Runbook](docs/runbook.md)** — failure modes and operational procedures.
+- **[Performance](docs/performance.md)** — load-test method and results.
+- **[Security](SECURITY.md)** — threat model and responsible disclosure.
 
-```sh
-make run          # run the API (needs a reachable Postgres via DATABASE_URL)
-make test         # go test ./...  (unit tests)
-make lint         # go vet + golangci-lint
-make migrate-up   # apply migrations
-make migrate-down # roll back the last migration
-make docker       # build the container image (< 30MB)
+## License
 
-# integration tests spin a real Postgres via testcontainers (needs Docker):
-go test -tags integration ./...
-```
-
-Config is read from the environment: `PORT`, `LOG_LEVEL`, `ENV`, `DATABASE_URL`, `REDIS_URL`.
-
-## Deploy (Kubernetes)
-
-The whole stack runs on a local **kind** cluster, packaged as a **Helm** chart
-(`deploy/k8s/shortn`), delivered by **ArgoCD** (GitOps), with the cluster and ArgoCD install
-themselves declared in **Terraform** (`deploy/terraform`). The API's Secret is committed only
-as an encrypted **SealedSecret** — never plaintext. Every `make` target for this is in the
-[Makefile](Makefile); the full walkthrough is [docs/phases/phase-7.md](docs/phases/phase-7.md).
-
-**Quick bring-up (Helm CLI):**
-
-```sh
-make k8s-up        # kind + ingress + metrics-server + sealed-secrets + images + chart + migrations
-make k8s-status    # watch pods settle
-curl -H "Host: shortn.localhost" localhost/healthz   # 200 through the ingress
-```
-
-**GitOps bring-up (Terraform builds the platform, ArgoCD deploys the app):**
-
-```sh
-make tf-init && make tf-apply        # Terraform: kind cluster + ArgoCD
-kind export kubeconfig --name shortn # point kubectl at the new cluster
-make sealed-secrets && make kind-load && make argocd-app && make k8s-migrate
-```
-
-What it demonstrates:
-
-- **GitOps** — ArgoCD continuously reconciles the cluster to git; manual drift **self-heals**, a merge that changes the chart deploys itself ([ADR 0012](docs/architecture/0012-gitops-delivery.md)).
-- **Zero-downtime rolling updates** — readiness-gated surge + graceful drain + a post-`SIGTERM` delay that beats the endpoint-deregistration race (zero 5xx under load).
-- **Autoscaling** — an HPA scales the API on CPU (`make k8s-load` to exercise it).
-- **Stateful data survives** — Postgres on a PVC outlives pod restarts; the API/analytics are stateless ([ADR 0011](docs/architecture/0011-orchestration.md)).
-- **Secrets** — SealedSecrets keep only ciphertext in git; the controller decrypts in-cluster ([runbook](docs/runbook.md#secrets-sealed-secrets)).
-- **CI → registry** — `.github/workflows/ci.yml` builds multi-arch images for `api` + `analytics` and pushes them to **GHCR** on every merge to `master` ([ADR 0013](docs/architecture/0013-infrastructure-as-code.md)).
-
-## Architecture
-
-Clean, layered design with dependency inversion:
-
-- `internal/http` — chi handlers, validation, the consistent JSON error shape. Knows HTTP, not SQL.
-- `internal/shortener` — core domain (create/resolve, URL rules, collision-retry). Defines the `LinkStore` and `IDGenerator` interfaces; imports no pgx and no `net/http`.
-- `internal/store` — pgx Postgres repository implementing `LinkStore`. The only package with SQL.
-- `internal/idgen` — `RandomBase62` implementing `IDGenerator` (Phase 3 swaps in a distributed scheme behind the same interface).
-
-The domain depends on interfaces, not concrete I/O, so implementations swap without touching business logic. Decisions are recorded as [ADRs](docs/architecture/README.md).
-
-## Performance
-
-Redis read-through cache (cache-aside) in front of Postgres. To show the
-effect, the same 500 freshly-created codes are resolved twice back-to-back over one reused
-HTTP connection: the **cold** pass is a cache miss (Redis miss → Postgres → populate), the
-**warm** pass is a cache hit (served from Redis, Postgres untouched).
-
-| metric | cold (miss) | warm (hit) | speedup |
-| ------ | ----------- | ---------- | ------- |
-| mean   | 176 µs      | 100 µs     | 1.76×   |
-| p90    | 489 µs      | 307 µs     | 1.59×   |
-| p99    | 653 µs      | 378 µs     | 1.73×   |
-
-Measured on loopback (`docker compose` on one machine), so absolute latencies are
-sub-millisecond and the median sits below `curl`'s timer resolution — the meaningful figure
-is the consistent ~1.7× reduction at the mean and tail. The bigger production win isn't this
-local microsecond delta: a cache **hit never touches Postgres** (verified by resolving a
-cached code with Postgres stopped), so the database is shielded from the read-heavy redirect
-path and from hot-key stampedes (collapsed via `singleflight`). Cache failures **fail open** —
-a Redis outage degrades latency, never correctness.
-
-### Load testing & a real bottleneck (Phase 8)
-
-Driven with **k6** (open model — a fixed arrival rate, so real overload is visible) against the
-stack: a redirect-heavy workload (the realistic ~99% read path) and a create-heavy one. The headline
-is a **found → fixed → re-measured** bottleneck. nginx had **no upstream `keepalive`**, so it opened
-a fresh TCP connection to the API on every request (and piled up `TIME_WAIT` sockets). Adding a
-keepalive pool (`keepalive 64` + HTTP/1.1 + cleared `Connection` header) cut redirect **p99 ~15×**
-under identical load:
-
-| redirect @ 200 req/s | before (no keepalive) | after (keepalive)   |
-| -------------------- | --------------------- | ------------------- |
-| median               | 1.64 ms               | 1.63 ms (unchanged) |
-| p95                  | 12.9 ms               | 4.4 ms              |
-| **p99**              | **172 ms**            | **11 ms**           |
-
-The median didn't move — the app was always fast per-request — so this was a **connection/queueing**
-problem, not compute; the fix crushed the tail. At 500 req/s the same change turned a runaway queue
-(p99 1.8 s, dropped requests) into fully-sustained load. The API also **autoscales**: under CPU load
-the HPA scaled `shortn-api` **1 → 4** pods within seconds and back to 1 after the stabilization
-window. All numbers are from a single laptop with the load generator co-resident, so the trustworthy
-signal is the **relative** before/after and the **shapes**, not absolute RPS — stated honestly rather
-than inflated.
-
-## Observability
-
-Every service emits the **three pillars** of telemetry, instrumented once against the
-**OpenTelemetry** Go SDK and exported **directly** to the backends — no OpenTelemetry
-Collector in the middle (justified for two services in [ADR 0010](docs/architecture/0010-observability.md)):
-
-| Pillar      | Answers                              | Tool           | How it's wired                                                                                                           |
-| ----------- | ------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| **Metrics** | _Is it healthy? Alert me._           | **Prometheus** | App exposes `/metrics`; Prometheus **pulls** (scrapes) every instance every 15s.                                         |
-| **Logs**    | _What happened to this one request?_ | **Loki**       | App keeps writing JSON to stdout; **Grafana Alloy** tails containers and ships to Loki. The app never learns about Loki. |
-| **Traces**  | _Why was this slow?_                 | **Tempo**      | App **pushes** spans over OTLP straight to Tempo.                                                                        |
-
-**Grafana** (http://localhost:3000) is the single pane: it queries all three datasources and
-auto-loads the provisioned **golden-signals dashboard** (Rate / Errors / Duration for the
-redirect & create paths, plus cache-hit ratio, consumer lag, and saturation).
-
-### The end-to-end trace
-
-The showpiece: **one click produces one trace that spans both services.** The W3C
-`traceparent` rides in the HTTP request, then is injected into the **Kafka record headers**
-by the producer and extracted by the consumer — so the span tree runs edge → API handler →
-Redis/Postgres → Kafka publish → **analytics consumer** → the click `INSERT` + offset commit,
-all stitched into a single trace even though a queue breaks the in-process call stack.
-
-![End-to-end trace spanning shortn-api and shortn-analytics across Kafka](docs/images/trace-end-to-end.png)
-
-> _Open Grafana → Explore → Tempo, run a search, and pick a redirect trace; it carries spans
-> from both `shortn-api` and `shortn-analytics`, with the queue wait visible as the gap._
-
-### SLOs & alerting
-
-Two SLOs drive the Prometheus alert rules ([alerts.yml](deploy/compose/observability/alerts.yml)),
-documented in the [runbook](docs/runbook.md#slis-slos--alerting):
-
-| SLI                                | SLO           | Alert                      |
-| ---------------------------------- | ------------- | -------------------------- |
-| Redirect latency (`/{code}`)       | 99.9% < 50 ms | `RedirectLatencySLOBreach` |
-| Create success (`POST /api/links`) | 99% non-5xx   | `CreateErrorSLOBreach`     |
-
-Plus operational alerts: `TargetDown` (a scrape target unreachable) and
-`AnalyticsConsumerLagHigh` (the consumer falling behind).
-
-### Try it
-
-```sh
-make up                                   # whole stack incl. Prometheus/Grafana/Loki/Tempo/Alloy
-open http://localhost:3000                # Grafana — the shortn-overview dashboard
-open http://localhost:9090/targets        # Prometheus — every scrape target up?
-make load                                 # k6 traffic to make the dashboards move
-```
-
-API and observability checks are also a **Postman collection** — see [docs/postman/](docs/postman/).
+[MIT](LICENSE)

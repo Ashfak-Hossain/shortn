@@ -1,0 +1,378 @@
+{
+  "info": {
+    "name": "shortn",
+    "_postman_id": "a1b2c3d4-0006-4000-8000-shortnphase6",
+    "description": "shortn URL shortener — every endpoint plus the Phase 6 observability checks.\n\nHow to use:\n1. `make up` to start the stack (edge = nginx on http://localhost).\n2. Run **API ▸ Create link** first — its test script saves the new code into the `lastCode` collection variable, so **Redirect** and **Stats** below it just work.\n3. IMPORTANT for **Redirect**: turn OFF auto-follow so you see the real 302. Postman Settings ▸ General ▸ 'Automatically follow redirects' = OFF (or the per-request Settings tab). Otherwise Postman chases the 302 to example.com and you see a 200 from there instead.\n\nVariables (Collection ▸ Variables tab):\n- baseUrl  = http://localhost      (nginx edge — the real entrypoint)\n- promUrl  = http://localhost:9090 (Prometheus UI/API)\n- grafanaUrl = http://localhost:3000\n- lastCode = (auto-filled by Create link)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost", "type": "string" },
+    { "key": "promUrl", "value": "http://localhost:9090", "type": "string" },
+    { "key": "grafanaUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "lastCode", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "API",
+      "item": [
+        {
+          "name": "Create link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('has code + short_url', () => {",
+                  "  pm.expect(body).to.have.property('code');",
+                  "  pm.expect(body).to.have.property('short_url');",
+                  "});",
+                  "// Save the new code so Redirect / Stats below can reuse it.",
+                  "pm.collectionVariables.set('lastCode', body.code);",
+                  "console.log('saved lastCode =', body.code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/observability-tour\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/links",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "links"]
+            },
+            "description": "Create a short link. Returns 201 with {code, short_url, long_url}. The test script stores `code` into the `lastCode` variable."
+          }
+        },
+        {
+          "name": "Create link (idempotent retry)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "// Send this request twice with the SAME Idempotency-Key: you get the",
+                  "// SAME code both times — no duplicate link. That is the Phase 5 dedupe.",
+                  "console.log('code =', pm.response.json().code);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "demo-key-12345" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/idempotent\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/links",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "links"]
+            },
+            "description": "Send TWICE with the same Idempotency-Key header → identical code, no duplicate. Proves the Phase 5 idempotency store."
+          }
+        },
+        {
+          "name": "Redirect (302)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('302 Found', () => pm.response.to.have.status(302));",
+                  "pm.test('Location header points at the long URL', () => {",
+                  "  pm.expect(pm.response.headers.get('Location')).to.be.a('string');",
+                  "});",
+                  "// Requires auto-follow-redirects OFF; see the collection description."
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": { "followRedirects": false },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/{{lastCode}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["{{lastCode}}"]
+            },
+            "description": "Resolve a short code → 302 to the long URL, and asynchronously publishes a click event to Kafka (the analytics trace). Run 'Create link' first so {{lastCode}} is set."
+          }
+        },
+        {
+          "name": "Stats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('has total + series', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b).to.have.property('total');",
+                  "  pm.expect(b).to.have.property('series');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/links/{{lastCode}}/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "links", "{{lastCode}}", "stats"]
+            },
+            "description": "Click stats for a code: {code, total, series[]}. Counts come from the analytics consumer writing click rows to Postgres, so hit 'Redirect' a few times first."
+          }
+        },
+        {
+          "name": "Create link — invalid (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('400 Bad Request', () => pm.response.to.have.status(400));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"url\": \"\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/links",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "links"]
+            },
+            "description": "Empty url → 400. Validation at the HTTP boundary."
+          }
+        },
+        {
+          "name": "Redirect — unknown code (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('404 Not Found', () => pm.response.to.have.status(404));"]
+              }
+            }
+          ],
+          "protocolProfileBehavior": { "followRedirects": false },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/doesnotexist00",
+              "host": ["{{baseUrl}}"],
+              "path": ["doesnotexist00"]
+            },
+            "description": "A code that was never created → 404."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health & Ops",
+      "item": [
+        {
+          "name": "healthz (liveness)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "// Liveness: NO dependency checks. Stays 200 even if Postgres is down."
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/healthz", "host": ["{{baseUrl}}"], "path": ["healthz"] },
+            "description": "Liveness probe — dependency-free, always fast. 'Am I alive? Restart me if not.'"
+          }
+        },
+        {
+          "name": "readyz (readiness)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 when Postgres reachable (503 if not)', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 503]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/readyz", "host": ["{{baseUrl}}"], "path": ["readyz"] },
+            "description": "Readiness probe — pings Postgres. 200 = take traffic, 503 = pull me from the load balancer. 'Should I receive traffic right now?'"
+          }
+        },
+        {
+          "name": "metrics (Prometheus scrape target)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('exposes http_server_duration_milliseconds', () => {",
+                  "  pm.expect(pm.response.text()).to.include('http_server_duration_milliseconds');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/metrics", "host": ["{{baseUrl}}"], "path": ["metrics"] },
+            "description": "The Prometheus pull endpoint. Plain-text exposition format — every metric the OTel SDK + runtime expose. This is what Prometheus scrapes every 15s. NOTE: through nginx you hit a random one of the 3 api instances."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Observability (Prometheus)",
+      "item": [
+        {
+          "name": "Targets — are all scrapes UP?",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().data.activeTargets;",
+                  "t.forEach(x => console.log(x.labels.job, x.labels.instance, '=>', x.health));",
+                  "pm.test('every shortn target is up', () => {",
+                  "  t.filter(x => /shortn/.test(x.labels.job)).forEach(x => pm.expect(x.health).to.eql('up'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{promUrl}}/api/v1/targets",
+              "host": ["{{promUrl}}"],
+              "path": ["api", "v1", "targets"]
+            },
+            "description": "Lists every scrape target and whether it's up/down. The api-1/2/3 + analytics jobs should all read 'up'."
+          }
+        },
+        {
+          "name": "Query — redirect p99 latency (ms)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{promUrl}}/api/v1/query?query=histogram_quantile(0.99, sum by (le) (rate(http_server_duration_milliseconds_bucket{job=\"shortn-api\",http_route=\"/{code}\"}[5m])))",
+              "host": ["{{promUrl}}"],
+              "path": ["api", "v1", "query"],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "histogram_quantile(0.99, sum by (le) (rate(http_server_duration_milliseconds_bucket{job=\"shortn-api\",http_route=\"/{code}\"}[5m])))"
+                }
+              ]
+            },
+            "description": "The redirect-latency SLI in PromQL: p99 over the last 5m, in milliseconds. SLO is < 50. Uses the _milliseconds metric (the _seconds one is broken in otelhttp v0.60 — see the units-bug note)."
+          }
+        },
+        {
+          "name": "Query — cache hit ratio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{promUrl}}/api/v1/query?query=sum(rate(cache_requests_total{result=\"hit\"}[5m])) / sum(rate(cache_requests_total[5m]))",
+              "host": ["{{promUrl}}"],
+              "path": ["api", "v1", "query"],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "sum(rate(cache_requests_total{result=\"hit\"}[5m])) / sum(rate(cache_requests_total[5m]))"
+                }
+              ]
+            },
+            "description": "Cache hit ratio: hits / (hits+misses), computed in PromQL from the counter pair — you never store a ratio (you can't average ratios)."
+          }
+        },
+        {
+          "name": "Query — consumer lag",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{promUrl}}/api/v1/query?query=max by (partition) (analytics_consumer_lag)",
+              "host": ["{{promUrl}}"],
+              "path": ["api", "v1", "query"],
+              "query": [{ "key": "query", "value": "max by (partition) (analytics_consumer_lag)" }]
+            },
+            "description": "Analytics consumer lag per partition — produced-but-not-yet-consumed clicks. Should hover near 0 when the consumer keeps up."
+          }
+        },
+        {
+          "name": "Alerts — loaded rules & state",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const groups = pm.response.json().data.groups;",
+                  "groups.flatMap(g => g.rules).forEach(r => console.log(r.name, '=>', r.state));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{promUrl}}/api/v1/rules",
+              "host": ["{{promUrl}}"],
+              "path": ["api", "v1", "rules"]
+            },
+            "description": "The 4 SLO/operational alert rules and their current state (inactive / pending / firing). Stop the analytics container to watch TargetDown go firing."
+          }
+        }
+      ]
+    }
+  ]
+}

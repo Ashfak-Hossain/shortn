@@ -56,9 +56,10 @@ Temporary Items
 *.LOCAL.*
 *.REMOTE.*
 
-# === Project-private (the guided curriculum is not for the public repo) ===
-docs/*
+# === Project-private (kept locally, never published) ===
 PLAN.md
+# Working file for the docs overhaul — never publishes
+PUBLISH-PREP.md
 
 # === Claude Code (local-only — not for the public repo) ===
 CLAUDE.md

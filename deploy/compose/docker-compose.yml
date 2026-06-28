@@ -239,7 +239,7 @@ services:
   alloy:
     image: grafana/alloy:v1.17.0
     # dev-only: run as root so Alloy can read the Docker socket to discover
-    # containers. In k8s (Phase 7) this becomes a DaemonSet reading node logs.
+    # containers. On Kubernetes this becomes a DaemonSet reading node logs.
     user: root
     command:
       - run

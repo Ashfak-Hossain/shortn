@@ -178,7 +178,7 @@ func main() {
 	// CONSUMER METRICS
 	// ============================================================
 
-	// These feed the Phase 6 dashboard. clicks_processed is throughput; lag is the
+	// These feed the Grafana dashboard. clicks_processed is throughput; lag is the
 	// backlog — what's been produced to a partition but not yet consumed — computed
 	// in the loop below from each partition's high watermark.
 	meter := otel.Meter("github.com/Ashfak-Hossain/shortn/cmd/analytics")

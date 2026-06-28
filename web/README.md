@@ -64,4 +64,4 @@ src/
 ## Production
 
 `npm run build` emits static files to `dist/`. In this project they are served behind the same
-ingress as the API (same origin), packaged into the Helm chart — see Phase 9, Submodule 9.5.
+ingress as the API (same origin), packaged into the Helm chart.

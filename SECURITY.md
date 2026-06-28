@@ -1,7 +1,6 @@
 # Security Policy
 
-`shortn` is a portfolio/learning project that is nonetheless engineered to be
-deployed on the public internet. This document is its **threat model**: what is
+`shortn` is a URL shortener deployed on the public internet. This document is its **threat model**: what is
 defended, what is accepted or deferred risk, and how to report a problem. There
 is no SLA; security is handled on a best-effort basis.
 
@@ -33,8 +32,8 @@ request to forge — and it shapes the whole model below.
 | **`Location` / response-header injection (CRLF)** | Go's `net/http` rejects header values containing CR/LF. |
 | **Stored/reflected XSS via codes or URLs** | The API responds `application/json` (escaped by `encoding/json`); no user data is rendered as HTML server-side. |
 | **CSRF** | The API is stateless with no cookie/session auth → no CSRF surface. |
-| **Denial of service / bulk abuse** | Redis-backed distributed token-bucket rate limiter (`429` + `Retry-After`), per-request timeouts, and a circuit breaker (Phase 5). |
-| **Secrets in source control** | Secrets are committed only as encrypted **SealedSecrets**; no plaintext credentials in git (Phase 7). |
+| **Denial of service / bulk abuse** | Redis-backed distributed token-bucket rate limiter (`429` + `Retry-After`), per-request timeouts, and a circuit breaker. |
+| **Secrets in source control** | Secrets are committed only as encrypted **SealedSecrets**; no plaintext credentials in git. |
 | **Code enumeration** | Short codes are coordination-free Snowflake IDs obfuscated with `sqids` — non-sequential, not guessable by increment. |
 
 ## Accepted or deferred risk (documented on purpose)
@@ -51,8 +50,8 @@ request to forge — and it shapes the whole model below.
   the right place when one is added.
 - **Open redirect is the product.** A URL shortener redirects anywhere by design.
   Abuse (phishing/malware laundering under a trusted short domain) is throttled by
-  rate limiting today; **Google Safe Browsing screening and/or an interstitial
-  warning page are planned for the public deployment** (Phase 9).
+  rate limiting today; Safe Browsing screening or an interstitial warning page
+  would reduce it further but are not built.
 - **No authentication on link creation.** Acceptable for the current scope and
   throttled by the rate limiter; light auth and/or abuse screening will be added
   before/at a public launch.

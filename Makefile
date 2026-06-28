@@ -121,7 +121,7 @@ chaos: ## take each dependency down in turn and assert documented behavior (docs
 	./scripts/chaos.sh
 
 # ------------ observability ------------
-load: ## drive preview traffic so the Phase 6 dashboards move (k6 via docker; needs the stack up)
+load: ## drive preview traffic so the Grafana dashboards move (k6 via docker; needs the stack up)
 	docker run --rm -i --network shortn_default -e BASE_URL=http://nginx grafana/k6 run - < load/preview.js
 
 # ------------ load testing (k6) ------------

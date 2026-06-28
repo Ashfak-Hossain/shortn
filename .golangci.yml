@@ -9,7 +9,7 @@ linters:
   exclusions:
     rules:
       # HTTP handlers must keep the (w, r) signature even when r is unused;
-      # renaming r to _ would only be reverted in Phase 1 when handlers read r.
+      # renaming r to _ would only be reverted once handlers read r.
       - linters: [revive]
         text: 'seems to be unused, consider removing or renaming'
 
